@@ -4,6 +4,21 @@
 #include <user/persistent_storage_manager.h>
 #include <user/config.h>
 
+static uint32_t g_werehogNormalPlayer = 0;
+static uint32_t g_werehogBattlePlayer = 0;
+
+struct CreatedSoundPlayer
+{
+    uint32_t player;
+    uint32_t arg4;
+    uint32_t arg5;
+    uint32_t arg6;
+    uint32_t arg7;
+};
+
+static CreatedSoundPlayer g_createdPlayers[256]{};
+static int g_createdPlayerCount = 0;
+
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
     AchievementManager::Unlock(id.u32);
@@ -46,12 +61,301 @@ bool DisableDLCIconMidAsmHook()
 
 void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
 {
+    static uint8_t lastState = 0xFF;
+
+    uint8_t state = r11.u8;
+    
+    static bool printedWerehogStrings = false;
+    //TEMP
+    if (!printedWerehogStrings)
+    {
+        printedWerehogStrings = true;
+
+        const char* stringA =
+            (const char*)g_memory.Translate(0x820C4794);
+
+        const char* stringB =
+            (const char*)g_memory.Translate(0x820C4770);
+
+        printf("0x820C4794 = %s\n", stringA);
+        printf("0x820C4770 = %s\n", stringB);
+    }
+
+
+    if (state != lastState)
+    {
+        lastState = state;
+
+        auto pGameDocument = SWA::CGameDocument::GetInstance();
+
+        if (pGameDocument && pGameDocument->m_pMember)
+        {
+            const char* stageName =
+                pGameDocument->m_pMember->m_StageName.c_str();
+
+            if (state == 4)
+            {
+                if (strcmp(stageName, "ActN_MykonosEvil") == 0)
+                {
+                    printf(
+                        "Windmill Isle Werehog battle started! Stage: %s\n",
+                        stageName
+                    );
+                }
+                /*else
+                {
+                printf(
+                    "Werehog battle started! Stage: %s\n",
+                    stageName
+                );*/
+            }
+            else if (state == 3)
+            {
+                printf(
+                    "Werehog battle ended! Stage: %s\n",
+                    stageName
+                );
+            }
+        }
+    }
+
     if (Config::BattleTheme)
         return;
 
     // Swap CStateBattle for CStateNormal.
     if (r11.u8 == 4)
         r11.u8 = 3;
+}
+
+/*Used to help reverse engineer the battle music cue system*/
+PPC_FUNC_IMPL(__imp__sub_82B4D970);
+
+PPC_FUNC(sub_82B4D970)
+{
+    const char* cueName =
+        (const char*)(base + ctx.r4.u32);
+
+    if (cueName != nullptr)
+    {
+        if (strcmp(cueName, "evil_normal") == 0)
+        {
+            g_werehogNormalPlayer = ctx.r3.u32;
+
+            printf(
+                "Werehog BGM: cue=%s player=0x%08X\n",
+                cueName,
+                ctx.r3.u32
+            );
+
+            printf(
+                "Werehog BGM: cue=%s player=0x%08X\n",
+                cueName,
+                ctx.r3.u32
+            );
+
+            for (int i = g_createdPlayerCount - 1; i >= 0; i--)
+            {
+                if (g_createdPlayers[i].player == ctx.r3.u32)
+                {
+                    printf(
+                        "MATCHED PLAYER CREATION:\n"
+                        "  index = %d\n"
+                        "  player = 0x%08X\n"
+                        "  r4 = 0x%08X\n"
+                        "  r5 = %u\n"
+                        "  r6 = %u\n"
+                        "  r7 = %u\n",
+                        i,
+                        g_createdPlayers[i].player,
+                        g_createdPlayers[i].arg4,
+                        g_createdPlayers[i].arg5,
+                        g_createdPlayers[i].arg6,
+                        g_createdPlayers[i].arg7
+                    );
+
+                    break;
+                }
+            }
+        }
+        else if (
+            strcmp(cueName, "evil_battle1") == 0 ||
+            strcmp(cueName, "evil_battle2") == 0 ||
+            strcmp(cueName, "evil_battle3") == 0 ||
+            strcmp(cueName, "evil_battle4") == 0)
+        {
+            g_werehogBattlePlayer = ctx.r3.u32;
+
+            printf(
+                "Werehog BGM: cue=%s player=0x%08X\n",
+                cueName,
+                ctx.r3.u32
+            );
+
+            for (int i = g_createdPlayerCount - 1; i >= 0; i--)
+            {
+                if (g_createdPlayers[i].player == ctx.r3.u32)
+                {
+                    printf(
+                        "MATCHED BATTLE PLAYER CREATION:\n"
+                        "  index = %d\n"
+                        "  player = 0x%08X\n"
+                        "  r4 = 0x%08X\n"
+                        "  r5 = %u\n"
+                        "  r6 = %u\n"
+                        "  r7 = %u\n",
+                        i,
+                        g_createdPlayers[i].player,
+                        g_createdPlayers[i].arg4,
+                        g_createdPlayers[i].arg5,
+                        g_createdPlayers[i].arg6,
+                        g_createdPlayers[i].arg7
+                    );
+
+                    break;
+                }
+            }
+        }
+    }
+
+    __imp__sub_82B4D970(ctx, base);
+}
+
+/*Used to check if the evil_normal is muted yet plays under bgm_stg_e_btl*/
+PPC_FUNC_IMPL(__imp__sub_82B4D778);
+
+PPC_FUNC(sub_82B4D778)
+{
+    if (ctx.r3.u32 == g_werehogNormalPlayer)
+    {
+        printf(
+            "D778 called on NORMAL player 0x%08X\n",
+            ctx.r3.u32
+        );
+    }
+    else if (ctx.r3.u32 == g_werehogBattlePlayer)
+    {
+        printf(
+            "D778 called on BATTLE player 0x%08X\n",
+            ctx.r3.u32
+        );
+    }
+
+    __imp__sub_82B4D778(ctx, base);
+}
+/*Used to track volume changes for werehog BGM*/
+PPC_FUNC_IMPL(__imp__sub_82B4DA70);
+
+PPC_FUNC(sub_82B4DA70)
+{
+    uint32_t player = ctx.r3.u32;
+    float volume = (float)ctx.f1.f64;
+
+    static int lastNormalBucket = -1;
+    static int lastBattleBucket = -1;
+
+    auto getBucket = [](float value)
+        {
+            if (value < 0.01f)
+                return 0; // muted
+
+            if (value < 0.25f)
+                return 1;
+
+            if (value < 0.75f)
+                return 2;
+
+            return 3; // mostly/full volume
+        };
+
+    if (player == g_werehogNormalPlayer)
+    {
+        int bucket = getBucket(volume);
+
+        if (bucket != lastNormalBucket)
+        {
+            lastNormalBucket = bucket;
+
+            printf(
+                "NORMAL volume: %.3f\n",
+                volume
+            );
+        }
+    }
+    else if (player == g_werehogBattlePlayer)
+    {
+        int bucket = getBucket(volume);
+
+        if (bucket != lastBattleBucket)
+        {
+            lastBattleBucket = bucket;
+
+            printf(
+                "BATTLE volume: %.3f\n",
+                volume
+            );
+        }
+    }
+
+    __imp__sub_82B4DA70(ctx, base);
+}
+
+/*more battle music reverse engineering diagnostics*/
+PPC_FUNC_IMPL(__imp__sub_82B4DF50);
+
+PPC_FUNC(sub_82B4DF50)
+{
+    uint32_t outputAddress = ctx.r3.u32;
+
+    uint32_t arg4 = ctx.r4.u32;
+    uint32_t arg5 = ctx.r5.u32;
+    uint32_t arg6 = ctx.r6.u32;
+    uint32_t arg7 = ctx.r7.u32;
+
+    __imp__sub_82B4DF50(ctx, base);
+
+    uint32_t player =
+        PPC_LOAD_U32(outputAddress);
+
+    if (player != 0 && g_createdPlayerCount < 256)
+    {
+        auto& record =
+            g_createdPlayers[g_createdPlayerCount++];
+
+        record.player = player;
+        record.arg4 = arg4;
+        record.arg5 = arg5;
+        record.arg6 = arg6;
+        record.arg7 = arg7;
+    }
+}
+/*Werehog BGM SETUP*/
+PPC_FUNC_IMPL(__imp__sub_82B48548);
+
+PPC_FUNC(sub_82B48548)
+{
+    static int callCount = 0;
+
+    uint32_t ownerAddress = ctx.r3.u32;
+
+    printf(
+        "\n=== Werehog BGM SETUP #%d ===\n",
+        ++callCount
+    );
+
+    __imp__sub_82B48548(ctx, base);
+
+    uint32_t member = PPC_LOAD_U32(ownerAddress + 156);
+
+    if (member != 0)
+    {
+        printf(
+            "normal +8  = 0x%08X\n"
+            "battle +16 = 0x%08X\n"
+            "==========================\n",
+            PPC_LOAD_U32(member + 8),
+            PPC_LOAD_U32(member + 16)
+        );
+    }
 }
 
 bool UseAlternateTitleMidAsmHook()

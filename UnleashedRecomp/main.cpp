@@ -204,6 +204,7 @@ int main(int argc, char *argv[])
         LOGN_WARNING("OS does not support registry.");
 
     os::logger::Init();
+    os::process::ShowConsole();
 
     PreloadContext preloadContext;
     preloadContext.PreloadExecutable();

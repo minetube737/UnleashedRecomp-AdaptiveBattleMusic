@@ -17,6 +17,8 @@ PPC_FUNC(sub_82624308)
 {
     __imp__sub_82624308(ctx, base);
 
+    LOGFN("Hit a checkpoint!");
+
     if (!Config::SaveScoreAtCheckpoints)
         return;
 
@@ -24,9 +26,27 @@ PPC_FUNC(sub_82624308)
     {
         g_lastEnemyScore = pGameDocument->m_pMember->m_ScoreInfo.EnemyScore;
         g_lastTrickScore = pGameDocument->m_pMember->m_ScoreInfo.TrickScore;
-
+        
         LOGFN("Score: {}", g_lastEnemyScore + g_lastTrickScore);
     }
+}
+
+/* Hook function that gets the final score and rank index from the original function
+and runs our code ontop*/
+PPC_FUNC_IMPL(__imp__sub_8245F010);
+PPC_FUNC(sub_8245F010)
+{
+    uint32_t score = ctx.r4.u32;
+
+    __imp__sub_8245F010(ctx, base);
+
+    uint32_t rankIndex = ctx.r3.u32;
+
+    LOGFN(
+        "Rank calculation: score={} rankIndex={}",
+        score,
+        rankIndex
+    );
 }
 
 /* Hook function that resets the score
@@ -66,12 +86,19 @@ PPC_FUNC(sub_823AF7A8)
     if (Config::FixUnleashOutOfControlDrain && pEvilSonicContext->m_OutOfControlCount && ctx.f1.f64 < 0.0)
         return;
 
+   
+
     __imp__sub_823AF7A8(ctx, base);
+
+    /*LOGFN(
+        "Gained Dark Gaia Energy"
+    );*/
 
     if (!Config::AllowCancellingUnleash)
         return;
 
     auto pInputState = SWA::CInputState::GetInstance();
+
 
     // Don't allow cancelling Unleash if the intro anim is still playing.
     if (!pInputState || pEvilSonicContext->m_AnimationID == 39)
@@ -82,6 +109,7 @@ PPC_FUNC(sub_823AF7A8)
         pEvilSonicContext->m_DarkGaiaEnergy = 0.0f;
         g_isUnleashCancelled = true;
     }
+
 }
 
 void PostUnleashMidAsmHook(PPCRegister& r30)
