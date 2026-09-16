@@ -3,9 +3,15 @@
 #include <user/achievement_manager.h>
 #include <user/persistent_storage_manager.h>
 #include <user/config.h>
+#include <kernel/heap.h>
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
+
+static bool g_werehogBattlePrimed = false;
+static bool g_insideWerehogBattleEntry = false;
+
+static bool g_werehogPersistentBattleStarted = false;
 
 struct CreatedSoundPlayer
 {
@@ -57,6 +63,119 @@ bool DisableEvilControlTutorialMidAsmHook(PPCRegister& r4, PPCRegister& r5)
 bool DisableDLCIconMidAsmHook()
 {
     return Config::DisableDLCIcon;
+}
+//WEREHOG BATTLE MUSIC START
+uint32_t ReadGuestU32(uint32_t address)
+{
+    uint8_t* base = g_memory.base;
+    return PPC_LOAD_U32(address);
+}
+
+static float ReadGuestF32(
+    uint8_t* base,
+    uint32_t address)
+{
+    PPCRegister value{};
+
+    value.u32 =
+        PPC_LOAD_U32(address);
+
+    return value.f32;
+}
+
+void DumpWerehogPlayerInternals(
+    const char* name,
+    uint32_t player)
+{
+    if (player == 0)
+    {
+        printf(
+            "%s:\n"
+            "  player = NULL\n",
+            name
+        );
+
+        return;
+    }
+
+    uint32_t internal =
+        ReadGuestU32(player + 4);
+
+    printf(
+        "%s:\n"
+        "  player           = 0x%08X\n"
+        "  internal         = 0x%08X\n",
+        name,
+        player,
+        internal
+    );
+
+    if (internal == 0)
+        return;
+
+    uint32_t sharedContext =
+        ReadGuestU32(internal + 0);
+
+    uint32_t lowerObject =
+        ReadGuestU32(internal + 4);
+
+    uint32_t controlCandidate =
+        ReadGuestU32(internal + 8);
+
+    printf(
+        "  internal+0      = 0x%08X\n"
+        "  internal+4      = 0x%08X  [lower object]\n"
+        "  internal+8      = 0x%08X  [control candidate]\n",
+        sharedContext,
+        lowerObject,
+        controlCandidate
+    );
+
+    if (lowerObject != 0)
+    {
+        printf(
+            "  LOWER OBJECT:\n"
+            "    +0  = 0x%08X\n"
+            "    +4  = 0x%08X\n"
+            "    +8  = 0x%08X\n"
+            "    +12 = 0x%08X\n"
+            "    +16 = 0x%08X\n",
+            ReadGuestU32(lowerObject + 0),
+            ReadGuestU32(lowerObject + 4),
+            ReadGuestU32(lowerObject + 8),
+            ReadGuestU32(lowerObject + 12),
+            ReadGuestU32(lowerObject + 16)
+        );
+    }
+}
+
+
+void DumpWerehogAudioStrings()
+{
+    constexpr uint32_t addresses[] =
+    {
+        0x82032818,
+        0x8203282C,
+        0x82032838,
+        0x82032848,
+        0x820C4C24
+    };
+
+    printf("\n=== WEREHOG AUDIO STRINGS ===\n");
+
+    for (uint32_t address : addresses)
+    {
+        const char* text =
+            reinterpret_cast<const char*>(
+                g_memory.Translate(address));
+
+        printf(
+            "0x%08X = %s\n",
+            address,
+            text);
+    }
+
+    printf("==============================\n");
 }
 
 void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
@@ -127,6 +246,272 @@ void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
         r11.u8 = 3;
 }
 
+void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
+{
+    //uint8_t* base = g_memory.base;
+
+    const char* cueName =
+        reinterpret_cast<const char*>(g_memory.Translate(r4.u32));
+
+    const char* customBattleCue = "test_battle";
+
+    size_t customBattleCueSize = strlen(customBattleCue) + 1;
+
+    static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
+
+    memcpy(customBattleCueMemory, customBattleCue, customBattleCueSize);
+
+    static uint32_t customBattleCueAddress = g_memory.MapVirtual(customBattleCueMemory);
+
+    const char* translatedCustomBattleCue =
+        reinterpret_cast<const char*>(g_memory.Translate(customBattleCueAddress));
+
+    printf("%s\n", translatedCustomBattleCue);
+
+    //g_userHeap.Free(customBattleCueMemory);
+
+    printf("Werehog battle cue: %s\n", cueName);
+
+    //constexpr uint32_t battleCueTable = 0x83306A5C;
+
+    //r4.u32 = PPC_LOAD_U32(battleCueTable + (translatedCustomBattleCue));
+    r4.u32 = customBattleCueAddress;
+
+    const char* cuePrefix =
+        reinterpret_cast<const char*>(g_memory.Translate(0x820C54E8));
+
+    printf("Cue prefix: %s\n", cuePrefix);
+
+    const char* newCue =
+        reinterpret_cast<const char*>(g_memory.Translate(r4.u32));
+
+    printf("Changed Werehog battle cue to: %s\n", newCue);
+}
+
+uint32_t GetTestBattleCueAddress()
+{
+    static uint32_t address = 0;
+
+    if (address == 0)
+    {
+        const char* cue = "test_battle";
+        size_t size = strlen(cue) + 1;
+
+        void* memory = g_userHeap.Alloc(size);
+
+        memcpy(
+            memory,
+            cue,
+            size
+        );
+
+        address =
+            g_memory.MapVirtual(memory);
+    }
+
+    return address;
+}
+
+static bool CallPlayerVtable8(
+    PPCContext ctx,
+    uint8_t* base,
+    uint32_t player,
+    uint32_t value)
+{
+    if (player == 0)
+        return false;
+
+    uint32_t vtable =
+        PPC_LOAD_U32(player + 0);
+
+    if (vtable == 0)
+        return false;
+
+    uint32_t method =
+        PPC_LOAD_U32(vtable + 8);
+
+    if (method == 0)
+        return false;
+
+    printf(
+        "Player vtable+8 call:\n"
+        "  player = 0x%08X\n"
+        "  vtable = 0x%08X\n"
+        "  method = 0x%08X\n"
+        "  value  = %u\n",
+        player,
+        vtable,
+        method,
+        value
+    );
+
+    ctx.r3.u64 = player;
+    ctx.r4.u64 = value;
+
+    PPC_CALL_INDIRECT_FUNC(method);
+
+    return true;
+}
+
+// ============================================
+// WEREHOG PERSISTENT BATTLE TRANSITION
+// ============================================
+
+PPC_FUNC_IMPL(__imp__sub_82B478E0);
+
+PPC_FUNC(sub_82B478E0)
+{
+    uint32_t transition =
+        ctx.r3.u32;
+
+    /*
+     * Only interfere after we have successfully started
+     * our persistent battle-music instance.
+     */
+    if (g_werehogPersistentBattleStarted && transition != 0 && PPC_LOAD_U8(transition + 100) == 0)
+    {
+        /*
+         * Native code calls sub_82E627B8 and compares
+         * its returned f1 against transition +104.
+         *
+         * We reproduce that condition so we intercept
+         * at the SAME point the game would've called
+         * battlePlayer->vtable+8(true).
+         */
+        PPCContext timeCtx = ctx;
+
+        timeCtx.r3.u64 =
+            transition;
+
+        sub_82E627B8(timeCtx, base);
+
+        float currentTime =
+            (float)timeCtx.f1.f64;
+
+        float startTime =
+            ReadGuestF32(base, transition + 104);
+
+        if (startTime <= currentTime)
+        {
+            /*
+             * Reproduce:
+             *
+             * sub_8315CF68(...)
+             * soundData = *(result + 156)
+             */
+            PPCContext ownerCtx = ctx;
+
+            ownerCtx.r3.u64 =
+                transition;
+
+            sub_8315CF68(ownerCtx, base);
+
+            uint32_t owner =
+                ownerCtx.r3.u32;
+
+            uint32_t soundData = 0;
+
+            if (owner != 0)
+            {
+                soundData =
+                    PPC_LOAD_U32(owner + 156);
+            }
+
+            if (soundData != 0)
+            {
+                uint32_t battlePlayer =
+                    PPC_LOAD_U32(soundData + 16);
+
+                /*
+                 * Safety check:
+                 * only suppress the call if this really
+                 * is OUR Werehog battlePlayer.
+                 */
+                if (battlePlayer == g_werehogBattlePlayer)
+                {
+                    float value108 =
+                        ReadGuestF32(base, transition + 108);
+
+                    float value112 =
+                        ReadGuestF32(base, transition + 112);
+
+                    /*
+                     * Native code reads this exact
+                     * game constant for f1.
+                     */
+                    float nativeOne =
+                        ReadGuestF32(base, 0x820008C4);
+
+                    /*
+                     * Reproduce the native fade setup
+                     * on soundData +224.
+                     *
+                     * What we intentionally DO NOT
+                     * reproduce is:
+                     *
+                     * battlePlayer->vtable+8(true)
+                     */
+
+                    PPCContext fadeCtx = ctx;
+
+                    fadeCtx.r3.u64 =
+                        soundData + 224;
+
+                    fadeCtx.f1.f64 =
+                        value108;
+
+                    sub_82B4E1F0(fadeCtx, base);
+
+                    fadeCtx = ctx;
+
+                    fadeCtx.r3.u64 =
+                        soundData + 224;
+
+                    fadeCtx.f1.f64 =
+                        nativeOne;
+
+                    fadeCtx.f2.f64 =
+                        value112;
+
+                    sub_82B4E190(fadeCtx, base);
+
+                    /*
+                     * Tell this transition object:
+                     *
+                     * "yes, the battle-player start
+                     * phase has already happened."
+                     *
+                     * A new transition object gets
+                     * created for a later encounter,
+                     * so this is NOT a global game
+                     * state mutation.
+                     */
+                    PPC_STORE_U8(transition + 100, 1);
+
+                    printf("Suppressed native battlePlayer " "restart; keeping persistent " "test_battle instance\n");
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * Do not call the original this frame.
+                     *
+                     * Native code itself jumps directly
+                     * to the end after performing this
+                     * activation/fade block.
+                     *
+                     * Calling the original after setting
+                     * +100 would make it execute the
+                     * NEXT phase one frame too early.
+                     */
+                    return;
+                }
+            }
+        }
+    }
+
+    __imp__sub_82B478E0(ctx, base);
+}
+
 /*Used to help reverse engineer the battle music cue system*/
 PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
@@ -135,46 +520,60 @@ PPC_FUNC(sub_82B4D970)
     const char* cueName =
         (const char*)(base + ctx.r4.u32);
 
+    if (g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted && ctx.r3.u32 == g_werehogBattlePlayer)
+    {
+        printf(
+            "Skipping battle-entry SetCue(%s)\n",
+            cueName ? cueName : "<null>"
+        );
+
+        return;
+    }
+
     if (cueName != nullptr)
     {
-        if (strcmp(cueName, "evil_normal") == 0)
+        if (
+            g_werehogBattlePlayer != 0 &&
+            !g_werehogBattlePrimed)
         {
-            g_werehogNormalPlayer = ctx.r3.u32;
+            PPCContext battleCtx = ctx;
+
+            battleCtx.r3.u64 =
+                g_werehogBattlePlayer;
+
+            battleCtx.r4.u64 =
+                GetTestBattleCueAddress();
 
             printf(
-                "Werehog BGM: cue=%s player=0x%08X\n",
-                cueName,
-                ctx.r3.u32
+                "Selecting test_battle on battlePlayer "
+                "0x%08X\n",
+                g_werehogBattlePlayer
             );
 
-            printf(
-                "Werehog BGM: cue=%s player=0x%08X\n",
-                cueName,
-                ctx.r3.u32
+            // Step 1:
+            // Select/prepare the cue.
+            __imp__sub_82B4D970(
+                battleCtx,
+                base
             );
 
-            for (int i = g_createdPlayerCount - 1; i >= 0; i--)
+            g_werehogBattlePrimed = true;
+
+            // Step 2:
+            // Do what the native game normally does later
+            // when it wants the selected cue to actually run.
+            if (CallPlayerVtable8(
+                ctx,
+                base,
+                g_werehogBattlePlayer,
+                1))
             {
-                if (g_createdPlayers[i].player == ctx.r3.u32)
-                {
-                    printf(
-                        "MATCHED PLAYER CREATION:\n"
-                        "  index = %d\n"
-                        "  player = 0x%08X\n"
-                        "  r4 = 0x%08X\n"
-                        "  r5 = %u\n"
-                        "  r6 = %u\n"
-                        "  r7 = %u\n",
-                        i,
-                        g_createdPlayers[i].player,
-                        g_createdPlayers[i].arg4,
-                        g_createdPlayers[i].arg5,
-                        g_createdPlayers[i].arg6,
-                        g_createdPlayers[i].arg7
-                    );
+                g_werehogPersistentBattleStarted = true;
 
-                    break;
-                }
+                printf(
+                    "Persistent test_battle playback started "
+                    "with volume still controlled by the game\n"
+                );
             }
         }
         else if (
@@ -220,28 +619,6 @@ PPC_FUNC(sub_82B4D970)
     __imp__sub_82B4D970(ctx, base);
 }
 
-/*Used to check if the evil_normal is muted yet plays under bgm_stg_e_btl*/
-PPC_FUNC_IMPL(__imp__sub_82B4D778);
-
-PPC_FUNC(sub_82B4D778)
-{
-    if (ctx.r3.u32 == g_werehogNormalPlayer)
-    {
-        printf(
-            "D778 called on NORMAL player 0x%08X\n",
-            ctx.r3.u32
-        );
-    }
-    else if (ctx.r3.u32 == g_werehogBattlePlayer)
-    {
-        printf(
-            "D778 called on BATTLE player 0x%08X\n",
-            ctx.r3.u32
-        );
-    }
-
-    __imp__sub_82B4D778(ctx, base);
-}
 /*Used to track volume changes for werehog BGM*/
 PPC_FUNC_IMPL(__imp__sub_82B4DA70);
 
@@ -299,6 +676,62 @@ PPC_FUNC(sub_82B4DA70)
     __imp__sub_82B4DA70(ctx, base);
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B465C8);
+
+PPC_FUNC(sub_82B465C8)
+{
+    g_insideWerehogBattleEntry = true;
+
+    __imp__sub_82B465C8(
+        ctx,
+        base
+    );
+
+    g_insideWerehogBattleEntry = false;
+}
+
+/*Used to check if the evil_normal is muted yet plays under bgm_stg_e_btl*/
+PPC_FUNC_IMPL(__imp__sub_82B4D778);
+
+PPC_FUNC(sub_82B4D778)
+{
+    uint32_t player = ctx.r3.u32;
+
+    if (player == g_werehogNormalPlayer)
+    {
+        printf(
+            "D778 called on NORMAL player 0x%08X\n",
+            player
+        );
+    }
+    else if (player == g_werehogBattlePlayer)
+    {
+        printf(
+            "D778 called on BATTLE player 0x%08X\n",
+            player
+        );
+    }
+
+    // Preserve our already-running persistent battle timeline.
+    // Only suppress D778 when it is the battle player,
+    // during the normal battle-entry routine,
+    // and our persistent instance has actually been started.
+    if (
+        player == g_werehogBattlePlayer &&
+        g_insideWerehogBattleEntry &&
+        g_werehogPersistentBattleStarted)
+    {
+        printf(
+            "Skipping battlePlayer D778 during battle entry: "
+            "persistent instance must survive\n"
+        );
+
+        return;
+    }
+
+    __imp__sub_82B4D778(ctx, base);
+}
+
 /*more battle music reverse engineering diagnostics*/
 PPC_FUNC_IMPL(__imp__sub_82B4DF50);
 
@@ -335,6 +768,8 @@ PPC_FUNC(sub_82B48548)
 {
     static int callCount = 0;
 
+    // Save this before calling the original function because
+    // the function is free to modify ctx.r3.
     uint32_t ownerAddress = ctx.r3.u32;
 
     printf(
@@ -342,22 +777,118 @@ PPC_FUNC(sub_82B48548)
         ++callCount
     );
 
+    // Run the game's original Werehog BGM setup.
     __imp__sub_82B48548(ctx, base);
 
-    uint32_t member = PPC_LOAD_U32(ownerAddress + 156);
+    // owner +156 contains the Werehog sound data object.
+    uint32_t member =
+        PPC_LOAD_U32(ownerAddress + 156);
 
     if (member != 0)
     {
+        // These are the actual player objects we've already identified.
+        uint32_t normalPlayer =
+            PPC_LOAD_U32(member + 8);
+
+        uint32_t battlePlayer =
+            PPC_LOAD_U32(member + 16);
+
+        g_werehogNormalPlayer = normalPlayer;
+        g_werehogBattlePlayer = battlePlayer;
+
+        g_werehogBattlePrimed = false;
+        g_werehogPersistentBattleStarted = false;
         printf(
             "normal +8  = 0x%08X\n"
             "battle +16 = 0x%08X\n"
             "==========================\n",
-            PPC_LOAD_U32(member + 8),
-            PPC_LOAD_U32(member + 16)
+            normalPlayer,
+            battlePlayer
+        );
+
+        printf(
+            "\n=== WEREHOG PLAYER INTERNALS ===\n"
+        );
+
+        DumpWerehogPlayerInternals(
+            "NORMAL",
+            normalPlayer
+        );
+
+        DumpWerehogPlayerInternals(
+            "BATTLE",
+            battlePlayer
+        );
+
+        printf(
+            "=================================\n"
         );
     }
+
+    DumpWerehogAudioStrings();
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B4D870);
+
+PPC_FUNC(sub_82B4D870)
+{
+    uint32_t player = ctx.r3.u32;
+    uint32_t value = ctx.r4.u32;
+
+    if (player == g_werehogNormalPlayer)
+    {
+        printf(
+            "D870 NORMAL player=0x%08X value=%u\n",
+            player,
+            value
+        );
+    }
+    else if (player == g_werehogBattlePlayer)
+    {
+        printf(
+            "D870 BATTLE player=0x%08X value=%u\n",
+            player,
+            value
+        );
+    }
+
+    __imp__sub_82B4D870(
+        ctx,
+        base
+    );
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B44AA8);
+
+PPC_FUNC(sub_82B44AA8)
+{
+    printf(
+        "AA8: entering battle-player activation candidate\n"
+    );
+
+    uint32_t owner = ctx.r3.u32;
+
+    uint32_t soundData =
+        PPC_LOAD_U32(owner + 156);
+
+    if (soundData != 0)
+    {
+        uint32_t battlePlayer =
+            PPC_LOAD_U32(soundData + 16);
+
+        printf(
+            "AA8: battlePlayer=0x%08X\n",
+            battlePlayer
+        );
+    }
+
+    __imp__sub_82B44AA8(
+        ctx,
+        base
+    );
+}
+
+//WEREHOG BATTLE MUSIC END
 bool UseAlternateTitleMidAsmHook()
 {
     auto isSWA = Config::Language == ELanguage::Japanese;
