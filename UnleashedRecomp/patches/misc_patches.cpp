@@ -353,6 +353,56 @@ static bool CallPlayerVtable8(
     return true;
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B4D528);
+
+PPC_FUNC(sub_82B4D528)
+{
+    uint32_t player = ctx.r3.u32;
+    uint32_t value = ctx.r4.u32;
+
+    /*
+     * We only want to synchronize the battle player
+     * when the NORMAL Werehog music player receives
+     * its real activation call.
+     */
+    bool shouldStartPersistentBattle =
+        player == g_werehogNormalPlayer &&
+        value == 1 &&
+        g_werehogBattlePrimed &&
+        !g_werehogPersistentBattleStarted &&
+        g_werehogBattlePlayer != 0;
+
+    /*
+     * Let the normal player's original activation happen first.
+     */
+    __imp__sub_82B4D528(
+        ctx,
+        base
+    );
+
+    if (shouldStartPersistentBattle)
+    {
+        printf(
+            "Normal player activated; "
+            "starting persistent test_battle now\n"
+        );
+
+        if (CallPlayerVtable8(
+            ctx,
+            base,
+            g_werehogBattlePlayer,
+            1))
+        {
+            g_werehogPersistentBattleStarted = true;
+
+            printf(
+                "Persistent test_battle synchronized "
+                "to normal player activation\n"
+            );
+        }
+    }
+}
+
 // ============================================
 // WEREHOG PERSISTENT BATTLE TRANSITION
 // ============================================
@@ -530,11 +580,7 @@ PPC_FUNC(sub_82B4D970)
         return;
     }
 
-    if (cueName != nullptr)
-    {
-        if (
-            g_werehogBattlePlayer != 0 &&
-            !g_werehogBattlePrimed)
+    if (strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
         {
             PPCContext battleCtx = ctx;
 
@@ -550,31 +596,12 @@ PPC_FUNC(sub_82B4D970)
                 g_werehogBattlePlayer
             );
 
-            // Step 1:
-            // Select/prepare the cue.
             __imp__sub_82B4D970(
-                battleCtx,
-                base
+               battleCtx,
+               base
             );
 
             g_werehogBattlePrimed = true;
-
-            // Step 2:
-            // Do what the native game normally does later
-            // when it wants the selected cue to actually run.
-            if (CallPlayerVtable8(
-                ctx,
-                base,
-                g_werehogBattlePlayer,
-                1))
-            {
-                g_werehogPersistentBattleStarted = true;
-
-                printf(
-                    "Persistent test_battle playback started "
-                    "with volume still controlled by the game\n"
-                );
-            }
         }
         else if (
             strcmp(cueName, "evil_battle1") == 0 ||
@@ -614,8 +641,6 @@ PPC_FUNC(sub_82B4D970)
                 }
             }
         }
-    }
-
     __imp__sub_82B4D970(ctx, base);
 }
 
