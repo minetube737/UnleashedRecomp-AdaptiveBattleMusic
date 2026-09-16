@@ -13,6 +13,8 @@ static bool g_insideWerehogBattleEntry = false;
 
 static bool g_werehogPersistentBattleStarted = false;
 
+static bool g_insideWerehogBgmSetup = false;
+
 struct CreatedSoundPlayer
 {
     uint32_t player;
@@ -158,7 +160,9 @@ void DumpWerehogAudioStrings()
         0x8203282C,
         0x82032838,
         0x82032848,
-        0x820C4C24
+        0x820C4C24,
+        0x82032854,
+        0x820C4F90
     };
 
     printf("\n=== WEREHOG AUDIO STRINGS ===\n");
@@ -286,6 +290,34 @@ void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
         reinterpret_cast<const char*>(g_memory.Translate(r4.u32));
 
     printf("Changed Werehog battle cue to: %s\n", newCue);
+}
+
+static uint32_t GetWindmillStageBankAddress()
+{
+    static uint32_t address = 0;
+
+    if (address == 0)
+    {
+        const char* bankName =
+            "bgm_stg_e_myk";
+
+        size_t size =
+            strlen(bankName) + 1;
+
+        void* memory =
+            g_userHeap.Alloc(size);
+
+        memcpy(
+            memory,
+            bankName,
+            size
+        );
+
+        address =
+            g_memory.MapVirtual(memory);
+    }
+
+    return address;
 }
 
 uint32_t GetTestBattleCueAddress()
@@ -786,6 +818,63 @@ PPC_FUNC(sub_82B4DF50)
         record.arg7 = arg7;
     }
 }
+
+PPC_FUNC_IMPL(__imp__sub_82E58910);
+
+PPC_FUNC(sub_82E58910)
+{
+    /*
+     * Only touch the ordinary Werehog battle bank
+     * while the Werehog BGM system is being built.
+     *
+     * 0x82032854 = "bgm_stg_e_btl"
+     */
+    if (
+        g_insideWerehogBgmSetup &&
+        ctx.r4.u32 == 0x82032854)
+    {
+        auto pGameDocument =
+            SWA::CGameDocument::GetInstance();
+
+        if (
+            pGameDocument &&
+            pGameDocument->m_pMember)
+        {
+            const char* stageName =
+                pGameDocument
+                ->m_pMember
+                ->m_StageName
+                .c_str();
+
+            /*
+             * First controlled test:
+             * Windmill Isle Night only.
+             */
+            if (
+                strcmp(
+                    stageName,
+                    "ActN_MykonosEvil"
+                ) == 0)
+            {
+                printf(
+                    "Redirecting Werehog battle bank:\n"
+                    "  stage = %s\n"
+                    "  bgm_stg_e_btl -> bgm_stg_e_myk\n",
+                    stageName
+                );
+
+                ctx.r4.u64 =
+                    GetWindmillStageBankAddress();
+            }
+        }
+    }
+
+    __imp__sub_82E58910(
+        ctx,
+        base
+    );
+}
+
 /*Werehog BGM SETUP*/
 PPC_FUNC_IMPL(__imp__sub_82B48548);
 
@@ -802,8 +891,12 @@ PPC_FUNC(sub_82B48548)
         ++callCount
     );
 
+    g_insideWerehogBgmSetup = true;
+
     // Run the game's original Werehog BGM setup.
     __imp__sub_82B48548(ctx, base);
+
+    g_insideWerehogBgmSetup = false;
 
     // owner +156 contains the Werehog sound data object.
     uint32_t member =
