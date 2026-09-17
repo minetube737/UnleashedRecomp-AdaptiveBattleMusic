@@ -111,6 +111,14 @@ PPC_FUNC(sub_82B4D528)
 {
     uint32_t player = ctx.r3.u32;
     uint32_t value = ctx.r4.u32;
+
+    // NEW: catch any attempt to re-activate a battle player
+    // that's already persistently running, and block it.
+    if (player == g_werehogBattlePlayer && value == 1 && g_werehogPersistentBattleStarted)
+    {
+        return; // no call to original — this activation is suppressed
+    }
+
     if (player != g_werehogNormalPlayer || value != 1 )
     {
         __imp__sub_82B4D528(ctx, base);
@@ -194,6 +202,8 @@ PPC_FUNC(sub_82B4D778)
     __imp__sub_82B4D778(ctx, base);
 
 }
+
+
 
 bool UseAlternateTitleMidAsmHook()
 {
