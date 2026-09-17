@@ -5,6 +5,12 @@
 #include <user/config.h>
 #include <kernel/heap.h>
 
+static uint32_t g_werehogNormalPlayer = 0;
+static uint32_t g_werehogBattlePlayer = 0;
+
+static bool g_werehogBattlePrimed = false;
+static bool g_werehogPersistentBattleStarted = false;
+static bool g_insideWerehogBattleEntry = false;
 
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
@@ -72,6 +78,121 @@ void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
     }
 
     r4.u32 = customBattleCueAddress;
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B48548);
+
+PPC_FUNC(sub_82B48548)
+{
+    uint32_t owner = ctx.r3.u32;
+
+    __imp__sub_82B48548(ctx, base);
+
+    if (owner == 0)
+    {
+        return;
+    }
+
+    uint32_t soundData = PPC_LOAD_U32(owner + 156);
+    if (soundData == 0)
+    {
+        return;
+    }
+
+    g_werehogNormalPlayer = PPC_LOAD_U32(soundData + 8);
+    g_werehogBattlePlayer = PPC_LOAD_U32(soundData + 16);
+    g_werehogBattlePrimed = false;
+    g_werehogPersistentBattleStarted = false;
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B4D528);
+
+PPC_FUNC(sub_82B4D528)
+{
+    uint32_t player = ctx.r3.u32;
+    uint32_t value = ctx.r4.u32;
+    if (player != g_werehogNormalPlayer || value != 1 )
+    {
+        __imp__sub_82B4D528(ctx, base);
+        return;
+    }
+    PPCContext battleCtx = ctx;
+    battleCtx.r3.u32 = g_werehogBattlePlayer;
+    battleCtx.r4.u32 = 1;
+    __imp__sub_82B4D528(ctx, base);
+    __imp__sub_82B4D528(battleCtx, base);
+
+    g_werehogPersistentBattleStarted = true;
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B4D970);
+
+PPC_FUNC(sub_82B4D970)
+{
+    const char* cueName = (const char*)(base + ctx.r4.u32);
+    uint32_t player = ctx.r3.u32;
+
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
+    {
+        return;
+    }
+
+    if(strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
+    {
+
+        const char* testBattleCue = "test_battle";
+        size_t testBattleCueSize = strlen(testBattleCue) + 1;
+        static void* testBattleCueMemory = g_userHeap.Alloc(testBattleCueSize);
+        static uint32_t testBattleCueAddress = 0;
+
+        if (testBattleCueAddress == 0)
+        {
+            memcpy(testBattleCueMemory, testBattleCue, testBattleCueSize);
+            testBattleCueAddress = g_memory.MapVirtual(testBattleCueMemory);
+        }
+
+        PPCContext battleCtx = ctx;
+        battleCtx.r3.u64 = g_werehogBattlePlayer;
+        battleCtx.r4.u64 = testBattleCueAddress;
+        __imp__sub_82B4D970(ctx, base);
+        __imp__sub_82B4D970(battleCtx, base);
+        g_werehogBattlePrimed = true;
+    }
+    else
+    {
+        __imp__sub_82B4D970(ctx, base);
+    }
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B465C8);
+
+PPC_FUNC(sub_82B465C8)
+{
+    g_insideWerehogBattleEntry = true;
+
+    __imp__sub_82B465C8(ctx, base);
+
+    g_insideWerehogBattleEntry = false;
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B4D778);
+
+PPC_FUNC(sub_82B4D778)
+{
+    uint32_t player = ctx.r3.u32;
+
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
+    {
+        printf(
+            "Skipping battlePlayer D778 during battle entry: "
+            "persistent instance must survive\n"
+        );
+
+        return;
+    }
+    
+    __imp__sub_82B4D778(ctx, base);
+
 }
 
 bool UseAlternateTitleMidAsmHook()
