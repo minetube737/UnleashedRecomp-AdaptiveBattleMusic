@@ -3,6 +3,8 @@
 #include <user/achievement_manager.h>
 #include <user/persistent_storage_manager.h>
 #include <user/config.h>
+#include <kernel/heap.h>
+
 
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
@@ -46,12 +48,30 @@ bool DisableDLCIconMidAsmHook()
 
 void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
 {
+
     if (Config::BattleTheme)
         return;
 
     // Swap CStateBattle for CStateNormal.
     if (r11.u8 == 4)
         r11.u8 = 3;
+}
+
+void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
+{   
+    static uint32_t customBattleCueAddress = 0;
+    const char* customBattleCue = "test_battle";
+
+    size_t customBattleCueSize = strlen(customBattleCue) + 1;
+    static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
+    
+    if (customBattleCueAddress == 0)
+    {
+        memcpy(customBattleCueMemory, customBattleCue, customBattleCueSize);
+        customBattleCueAddress = g_memory.MapVirtual(customBattleCueMemory);
+    }
+
+    r4.u32 = customBattleCueAddress;
 }
 
 bool UseAlternateTitleMidAsmHook()
