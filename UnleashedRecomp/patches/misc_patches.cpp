@@ -87,6 +87,20 @@ static uint32_t GetCueGuestAddress(const char* cue)
 
 static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
     { "ActN_MykonosEvil", "myk_e_btl" },
+    { "ActN_Mission_Mykonos", "myk_e_btl" },
+    { "ActN_SubMykonos_01", "myk_e_btl" },
+    { "ActN_SubMykonos_02", "myk_e_btl" },
+    { "ActN_SubMykonos_03", "myk_e_btl" },
+    { "ActN_SubMykonos_04", "myk_e_btl" },
+    { "ActN_BeachEvil", "sea_e_btl" },
+    { "ActN_Mission_Beach", "sea_e_btl" },
+    { "ActN_SubBeach_01", "sea_e_btl" },
+    { "ActN_SubBeach_02", "sea_e_btl" },
+    { "ActN_SubBeach_03", "sea_e_btl" },
+    { "ActN_SnowEvil", "snw_e_btl" },
+    { "ActN_Mission_Snow", "snw_e_btl" },
+    { "ActN_SubSnow_01", "snw_e_btl" },
+    { "ActN_SubSnow_02", "snw_e_btl" },
     // add more stage IDs -> cue names as you author them
 };
 
