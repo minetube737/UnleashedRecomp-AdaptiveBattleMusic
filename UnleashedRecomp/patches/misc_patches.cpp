@@ -4,9 +4,12 @@
 #include <user/persistent_storage_manager.h>
 #include <user/config.h>
 #include <kernel/heap.h>
+#include <unordered_map>
+#include <string>
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
+static uint32_t g_werehogSpecialPlayer = 0;
 
 static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
@@ -63,10 +66,50 @@ void WerehogBattleMusicMidAsmHook(PPCRegister& r11)
         r11.u8 = 3;
 }
 
+static uint32_t GetCueGuestAddress(const char* cue)
+{
+    static std::unordered_map<std::string, uint32_t> cache;
+
+    auto it = cache.find(cue);
+    if (it != cache.end())
+    {
+        return it->second;
+    }
+
+    size_t size = strlen(cue) + 1;
+    void* memory = g_userHeap.Alloc(size);
+    memcpy(memory, cue, size);
+    uint32_t address = g_memory.MapVirtual(memory);
+
+    cache.emplace(cue, address);
+    return address;
+}
+
+static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
+    { "ActN_MykonosEvil", "myk_e_btl" },
+    // add more stage IDs -> cue names as you author them
+};
+
+static const char* GetStageBattleCueName()
+{
+    auto pGameDocument = SWA::CGameDocument::GetInstance();
+    if (!pGameDocument)
+        return "evil_battle1";
+
+    const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
+
+    auto it = g_stageBattleCues.find(stageName);
+    if (it != g_stageBattleCues.end())
+        return it->second.c_str();
+
+    return "evil_battle1";
+}
+
 void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
 {   
     static uint32_t customBattleCueAddress = 0;
     const char* customBattleCue = "test_battle";
+
 
     size_t customBattleCueSize = strlen(customBattleCue) + 1;
     static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
@@ -101,6 +144,7 @@ PPC_FUNC(sub_82B48548)
 
     g_werehogNormalPlayer = PPC_LOAD_U32(soundData + 8);
     g_werehogBattlePlayer = PPC_LOAD_U32(soundData + 16);
+    g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     g_werehogBattlePrimed = false;
     g_werehogPersistentBattleStarted = false;
 }
@@ -112,6 +156,7 @@ PPC_FUNC(sub_82B4D528)
     uint32_t player = ctx.r3.u32;
     uint32_t value = ctx.r4.u32;
 
+
     // NEW: catch any attempt to re-activate a battle player
     // that's already persistently running, and block it.
     if (player == g_werehogBattlePlayer && value == 1 && g_werehogPersistentBattleStarted)
@@ -119,8 +164,19 @@ PPC_FUNC(sub_82B4D528)
         return; // no call to original — this activation is suppressed
     }
 
-    if (player != g_werehogNormalPlayer || value != 1 )
+    if (player != g_werehogNormalPlayer || value != 1)
     {
+        if (player == g_werehogSpecialPlayer)
+        {
+            uint32_t vtable = PPC_LOAD_U32(player + 0);
+            uint32_t method = PPC_LOAD_U32(vtable + 4);
+            uint32_t battleVtable = PPC_LOAD_U32(g_werehogBattlePlayer + 0);
+            uint32_t battleMethod = PPC_LOAD_U32(battleVtable + 4);
+
+            printf("D528 reached for SPECIAL player 0x%08X, value=%u\n", player, value);
+            printf("D528 SPECIAL player vtable=0x%08X, vtable+4 method=0x%08X\n", vtable, method);
+            printf("D528 BATTLE player vtable=0x%08X, vtable+4 method=0x%08X\n", battleVtable, battleMethod);
+        }
         __imp__sub_82B4D528(ctx, base);
         return;
     }
@@ -148,16 +204,7 @@ PPC_FUNC(sub_82B4D970)
     if(strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
     {
 
-        const char* testBattleCue = "test_battle";
-        size_t testBattleCueSize = strlen(testBattleCue) + 1;
-        static void* testBattleCueMemory = g_userHeap.Alloc(testBattleCueSize);
-        static uint32_t testBattleCueAddress = 0;
-
-        if (testBattleCueAddress == 0)
-        {
-            memcpy(testBattleCueMemory, testBattleCue, testBattleCueSize);
-            testBattleCueAddress = g_memory.MapVirtual(testBattleCueMemory);
-        }
+        uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
 
         PPCContext battleCtx = ctx;
         battleCtx.r3.u64 = g_werehogBattlePlayer;
@@ -181,6 +228,19 @@ PPC_FUNC(sub_82B465C8)
     __imp__sub_82B465C8(ctx, base);
 
     g_insideWerehogBattleEntry = false;
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B45C78);
+
+PPC_FUNC(sub_82B45C78)
+{
+    uint32_t owner = ctx.r3.u32;
+    uint32_t soundData = PPC_LOAD_U32(owner + 156);
+
+    printf("D45C78 reached for Werehog owner 0x%08X\n", owner);
+    printf("D45C78 reached for Werehog soundData 0x%08X\n", soundData);
+
+    __imp__sub_82B45C78(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
