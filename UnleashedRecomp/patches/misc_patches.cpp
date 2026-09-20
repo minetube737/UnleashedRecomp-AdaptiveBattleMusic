@@ -6,6 +6,9 @@
 #include <kernel/heap.h>
 #include <unordered_map>
 #include <string>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <user/paths.h>
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
@@ -85,8 +88,8 @@ static uint32_t GetCueGuestAddress(const char* cue)
     return address;
 }
 
-static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
-    { "ActN_MykonosEvil", "myk_e_btl" },
+static std::unordered_map<std::string, std::string> g_stageBattleCues = {
+    /*{"ActN_MykonosEvil", "myk_e_btl"},
     { "ActN_Mission_Mykonos", "myk_e_btl" },
     { "ActN_SubMykonos_01", "myk_e_btl" },
     { "ActN_SubMykonos_02", "myk_e_btl" },
@@ -100,12 +103,62 @@ static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
     { "ActN_SnowEvil", "snw_e_btl" },
     { "ActN_Mission_Snow", "snw_e_btl" },
     { "ActN_SubSnow_01", "snw_e_btl" },
-    { "ActN_SubSnow_02", "snw_e_btl" },
+    { "ActN_SubSnow_02", "snw_e_btl" },*/
     // add more stage IDs -> cue names as you author them
 };
 
+static void LoadStageBattleCues()
+{
+    auto path = GetGamePath() / "stage_battle_cues.json";
+
+    printf("Looking for stage cue file at: %s\n", path.string().c_str());
+
+    std::ifstream stream(path);
+
+
+    if (!stream.is_open())
+    {
+        printf("Stage cue file not found.\n");
+        return;
+    }
+
+    nlohmann::json j;
+
+    try
+    {
+        j = nlohmann::json::parse(stream);
+    }
+    catch (nlohmann::json::parse_error& err)
+    {
+        printf("Failed to parse stage_battle_cues.json: %s\n", err.what());
+        return;
+    }
+
+    for (auto& [key, value] : j.items())
+    {
+        try
+        {
+            g_stageBattleCues[key] = value.get<std::string>();
+        }
+        catch (nlohmann::json::type_error& err)
+        {
+            printf("Failed to parse value for stage '%s' in stage_battle_cues.json: %s\n", key.c_str(), err.what());
+        }
+    }
+
+    printf("Loaded %zu stage battle cue entries from stage_battle_cues.json.\n", g_stageBattleCues.size());
+}
+
+
 static const char* GetStageBattleCueName()
 {
+    static bool loaded = false;
+    if (!loaded)
+    {
+        LoadStageBattleCues();
+        loaded = true;
+    }
+
     auto pGameDocument = SWA::CGameDocument::GetInstance();
     if (!pGameDocument)
         return "evil_battle1";
@@ -119,12 +172,10 @@ static const char* GetStageBattleCueName()
     return "evil_battle1";
 }
 
-<<<<<<< HEAD
 void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
 {   
     static uint32_t customBattleCueAddress = 0;
     const char* customBattleCue = "test_battle";
-
 
     size_t customBattleCueSize = strlen(customBattleCue) + 1;
     static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
@@ -138,13 +189,14 @@ void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
     r4.u32 = customBattleCueAddress;
 }
 
-=======
->>>>>>> parent of eee2a46 (Revert "removed WerehogBattleCueTestMidAsmHook")
+
 PPC_FUNC_IMPL(__imp__sub_82B48548);
 
 PPC_FUNC(sub_82B48548)
 {
     uint32_t owner = ctx.r3.u32;
+
+    
 
     __imp__sub_82B48548(ctx, base);
 
