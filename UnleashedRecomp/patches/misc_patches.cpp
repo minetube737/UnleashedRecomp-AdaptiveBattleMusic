@@ -171,26 +171,6 @@ static const char* GetStageBattleCueName()
     return "evil_battle1";
 }
 
-
-
-void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
-{   
-    static uint32_t customBattleCueAddress = 0;
-    const char* customBattleCue = "test_battle";
-
-
-    size_t customBattleCueSize = strlen(customBattleCue) + 1;
-    static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
-    
-    if (customBattleCueAddress == 0)
-    {
-        memcpy(customBattleCueMemory, customBattleCue, customBattleCueSize);
-        customBattleCueAddress = g_memory.MapVirtual(customBattleCueMemory);
-    }
-
-    r4.u32 = customBattleCueAddress;
-}
-
 PPC_FUNC_IMPL(__imp__sub_82B48548);
 
 PPC_FUNC(sub_82B48548)

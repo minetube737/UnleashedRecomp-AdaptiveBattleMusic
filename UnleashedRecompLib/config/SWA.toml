@@ -82,11 +82,6 @@ invalid_instructions = [
 ]
 
 [[midasm_hook]]
-name = "WerehogBattleCueTestMidAsmHook"
-address = 0x82B46614
-registers = ["r4"]
-
-[[midasm_hook]]
 name = "IndexBufferLengthMidAsmHook"
 address = 0x82E26244
 registers = ["r3"]
