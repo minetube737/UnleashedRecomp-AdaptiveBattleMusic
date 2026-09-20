@@ -6,6 +6,9 @@
 #include <kernel/heap.h>
 #include <unordered_map>
 #include <string>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <user/paths.h>
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
@@ -85,8 +88,8 @@ static uint32_t GetCueGuestAddress(const char* cue)
     return address;
 }
 
-static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
-    { "ActN_MykonosEvil", "myk_e_btl" },
+static std::unordered_map<std::string, std::string> g_stageBattleCues = {
+    /*{"ActN_MykonosEvil", "myk_e_btl"},
     { "ActN_Mission_Mykonos", "myk_e_btl" },
     { "ActN_SubMykonos_01", "myk_e_btl" },
     { "ActN_SubMykonos_02", "myk_e_btl" },
@@ -101,11 +104,60 @@ static const std::unordered_map<std::string, std::string> g_stageBattleCues = {
     { "ActN_Mission_Snow", "snw_e_btl" },
     { "ActN_SubSnow_01", "snw_e_btl" },
     { "ActN_SubSnow_02", "snw_e_btl" },
-    // add more stage IDs -> cue names as you author them
+    // add more stage IDs -> cue names as you author them*/
 };
+
+static void LoadStageBattleCues()
+{
+    auto path = GetGamePath() / "stage_battle_cues.json";
+
+    printf("Looking for stage cue file at: %s\n", path.string().c_str());
+
+    std::ifstream stream(path);
+
+
+    if (!stream.is_open())
+    {
+        printf("Stage cue file not found.\n");
+        return;
+    }
+
+    nlohmann::json j;
+
+    try
+    {
+        j = nlohmann::json::parse(stream);
+    }
+    catch (nlohmann::json::parse_error& err)
+    {
+        printf("Failed to parse stage_battle_cues.json: %s\n", err.what());
+        return;
+    }
+
+    for (auto& [key, value] : j.items())
+    {
+        try
+        {
+            g_stageBattleCues[key] = value.get<std::string>();
+        }
+        catch (nlohmann::json::type_error& err)
+        {
+            printf("Failed to parse value for stage '%s' in stage_battle_cues.json: %s\n", key.c_str(), err.what());
+        }
+    }
+
+    printf("Loaded %zu stage battle cue entries from stage_battle_cues.json.\n", g_stageBattleCues.size());
+}
 
 static const char* GetStageBattleCueName()
 {
+    static bool loaded = false;
+    if (!loaded)
+    {
+        LoadStageBattleCues();
+        loaded = true;
+    }
+
     auto pGameDocument = SWA::CGameDocument::GetInstance();
     if (!pGameDocument)
         return "evil_battle1";
@@ -118,6 +170,8 @@ static const char* GetStageBattleCueName()
 
     return "evil_battle1";
 }
+
+
 
 void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
 {   
@@ -170,6 +224,16 @@ PPC_FUNC(sub_82B4D528)
     uint32_t player = ctx.r3.u32;
     uint32_t value = ctx.r4.u32;
 
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
+
+    printf("[D528] player=%s (0x%08X) value=%u persistentStarted=%d insideBattleEntry=%d\n",
+        playerLabel, player, value, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
+
+    if (player == 0)
+    {
+        __imp__sub_82B4D528(ctx, base);
+        return;
+    }
 
     // NEW: catch any attempt to re-activate a battle player
     // that's already persistently running, and block it.
@@ -180,17 +244,6 @@ PPC_FUNC(sub_82B4D528)
 
     if (player != g_werehogNormalPlayer || value != 1)
     {
-        if (player == g_werehogSpecialPlayer)
-        {
-            uint32_t vtable = PPC_LOAD_U32(player + 0);
-            uint32_t method = PPC_LOAD_U32(vtable + 4);
-            uint32_t battleVtable = PPC_LOAD_U32(g_werehogBattlePlayer + 0);
-            uint32_t battleMethod = PPC_LOAD_U32(battleVtable + 4);
-
-            printf("D528 reached for SPECIAL player 0x%08X, value=%u\n", player, value);
-            printf("D528 SPECIAL player vtable=0x%08X, vtable+4 method=0x%08X\n", vtable, method);
-            printf("D528 BATTLE player vtable=0x%08X, vtable+4 method=0x%08X\n", battleVtable, battleMethod);
-        }
         __imp__sub_82B4D528(ctx, base);
         return;
     }
@@ -207,8 +260,19 @@ PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
 PPC_FUNC(sub_82B4D970)
 {
+    if (ctx.r4.u32 == 0)
+    {
+        __imp__sub_82B4D970(ctx, base);
+        return;
+    }
+
     const char* cueName = (const char*)(base + ctx.r4.u32);
     uint32_t player = ctx.r3.u32;
+
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
+
+    printf("[D970] player=%s (0x%08X) cue=%s primed=%d persistentStarted=%d insideBattleEntry=%d\n",
+        playerLabel, player, cueName, g_werehogBattlePrimed, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
 
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
@@ -239,7 +303,11 @@ PPC_FUNC(sub_82B465C8)
 {
     g_insideWerehogBattleEntry = true;
 
+    printf("[465C8] battle entry START\n");
+
     __imp__sub_82B465C8(ctx, base);
+
+    printf("[465C8] battle entry END\n");
 
     g_insideWerehogBattleEntry = false;
 }
