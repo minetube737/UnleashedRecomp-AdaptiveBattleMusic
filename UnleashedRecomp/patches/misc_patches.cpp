@@ -222,18 +222,32 @@ PPC_FUNC(sub_82B4D528)
         return; // no call to original — this activation is suppressed
     }
 
+    if (player == g_werehogBattlePlayer && value == 1 && g_insideWerehogBattleEntry && !g_werehogPersistentBattleStarted)
+    {
+        __imp__sub_82B4D528(ctx, base);
+        g_werehogPersistentBattleStarted = true;
+        g_werehogBattlePrimed = true;
+        return;
+    }
+
     if (player != g_werehogNormalPlayer || value != 1)
     {
         __imp__sub_82B4D528(ctx, base);
         return;
     }
-    PPCContext battleCtx = ctx;
-    battleCtx.r3.u32 = g_werehogBattlePlayer;
-    battleCtx.r4.u32 = 1;
-    __imp__sub_82B4D528(ctx, base);
-    __imp__sub_82B4D528(battleCtx, base);
 
-    g_werehogPersistentBattleStarted = true;
+    __imp__sub_82B4D528(ctx, base);
+
+    if(!g_werehogPersistentBattleStarted)
+    {
+        PPCContext battleCtx = ctx;
+        battleCtx.r3.u32 = g_werehogBattlePlayer;
+        battleCtx.r4.u32 = 1;
+        __imp__sub_82B4D528(battleCtx, base);
+
+        g_werehogPersistentBattleStarted = true;
+    }
+    
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D970);
@@ -256,6 +270,14 @@ PPC_FUNC(sub_82B4D970)
 
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
+        return;
+    }
+
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && !g_werehogPersistentBattleStarted)
+    {
+        ctx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
+        __imp__sub_82B4D970(ctx, base);
+        g_werehogBattlePrimed = true;
         return;
     }
 
