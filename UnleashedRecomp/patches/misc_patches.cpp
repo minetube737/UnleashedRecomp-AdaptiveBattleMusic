@@ -17,9 +17,6 @@ static uint32_t g_werehogSpecialPlayer = 0;
 static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
-static bool g_werehogForceSyncPending = false;
-
-static bool g_werehogNormalPlayerDupGuard = false; // new global, alongside the others
 
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
@@ -92,7 +89,7 @@ static uint32_t GetCueGuestAddress(const char* cue)
 }
 
 static std::unordered_map<std::string, std::string> g_stageBattleCues = {
-    /*{ "ActN_MykonosEvil", "myk_e_btl" },
+    /*{"ActN_MykonosEvil", "myk_e_btl"},
     { "ActN_Mission_Mykonos", "myk_e_btl" },
     { "ActN_SubMykonos_01", "myk_e_btl" },
     { "ActN_SubMykonos_02", "myk_e_btl" },
@@ -106,8 +103,8 @@ static std::unordered_map<std::string, std::string> g_stageBattleCues = {
     { "ActN_SnowEvil", "snw_e_btl" },
     { "ActN_Mission_Snow", "snw_e_btl" },
     { "ActN_SubSnow_01", "snw_e_btl" },
-    { "ActN_SubSnow_02", "snw_e_btl" },*/
-    // add more stage IDs -> cue names as you author them
+    { "ActN_SubSnow_02", "snw_e_btl" },
+    // add more stage IDs -> cue names as you author them*/
 };
 
 static void LoadStageBattleCues()
@@ -174,6 +171,8 @@ static const char* GetStageBattleCueName()
     return "evil_battle1";
 }
 
+
+
 void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
 {   
     static uint32_t customBattleCueAddress = 0;
@@ -216,18 +215,6 @@ PPC_FUNC(sub_82B48548)
     g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     g_werehogBattlePrimed = false;
     g_werehogPersistentBattleStarted = false;
-    g_werehogForceSyncPending = false;
-
-    // --- proactive battle-cue priming ---
-
-    // 1. Verify stage name is actually populated here before wiring in
-    //    the real call. Print it and check in-game.
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
-    if (pGameDocument)
-    {
-        printf("[48548] stage name at Werehog setup = %s\n",
-            pGameDocument->m_pMember->m_StageName.c_str());
-    }
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D528);
@@ -236,6 +223,11 @@ PPC_FUNC(sub_82B4D528)
 {
     uint32_t player = ctx.r3.u32;
     uint32_t value = ctx.r4.u32;
+
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
+
+    printf("[D528] player=%s (0x%08X) value=%u persistentStarted=%d insideBattleEntry=%d\n",
+        playerLabel, player, value, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
 
     if (player == 0)
     {
@@ -247,48 +239,14 @@ PPC_FUNC(sub_82B4D528)
     // that's already persistently running, and block it.
     if (player == g_werehogBattlePlayer && value == 1 && g_werehogPersistentBattleStarted)
     {
-        printf("[D528] blocked native re-activation of battlePlayer\n");
-        return;
+        return; // no call to original — this activation is suppressed
     }
 
-    if (player == g_werehogNormalPlayer && value == 1)
+    if (player != g_werehogNormalPlayer || value != 1)
     {
-        if (g_werehogNormalPlayerDupGuard)
-        {
-            g_werehogNormalPlayerDupGuard = false; // this is the duplicate — consume it and block
-            return;
-        }
-        g_werehogNormalPlayerDupGuard = true; // this is the real one — let it fall through below
-    }
-
-    if (player != g_werehogNormalPlayer || value != 1 || g_werehogPersistentBattleStarted)
-    {
-        if (player == g_werehogSpecialPlayer)
-        {
-            uint32_t vtable = PPC_LOAD_U32(player + 0);
-            uint32_t method = PPC_LOAD_U32(vtable + 4);
-            uint32_t battleVtable = PPC_LOAD_U32(g_werehogBattlePlayer + 0);
-            uint32_t battleMethod = PPC_LOAD_U32(battleVtable + 4);
-
-            printf("D528 reached for SPECIAL player 0x%08X, value=%u\n", player, value);
-            printf("D528 SPECIAL player vtable=0x%08X, vtable+4 method=0x%08X\n", vtable, method);
-            printf("D528 BATTLE player vtable=0x%08X, vtable+4 method=0x%08X\n", battleVtable, battleMethod);
-        }
-
-        // >>> NEW: if this call is native activating battlePlayer for the
-        // first time (not through our own sync path below), remember that
-        // it's now running so the sync path doesn't start it again later.
-        if (player == g_werehogBattlePlayer && value == 1 && !g_werehogPersistentBattleStarted)
-        {
-            g_werehogPersistentBattleStarted = true;
-            printf("[D528] native activated battlePlayer directly — marking persistent\n");
-        }
-        // <<< NEW
-
         __imp__sub_82B4D528(ctx, base);
         return;
     }
-    printf("[SYNC] activating battlePlayer for the first time, primed=%d\n", g_werehogBattlePrimed);
     PPCContext battleCtx = ctx;
     battleCtx.r3.u32 = g_werehogBattlePlayer;
     battleCtx.r4.u32 = 1;
@@ -302,13 +260,21 @@ PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
 PPC_FUNC(sub_82B4D970)
 {
+    if (ctx.r4.u32 == 0)
+    {
+        __imp__sub_82B4D970(ctx, base);
+        return;
+    }
+
     const char* cueName = (const char*)(base + ctx.r4.u32);
     uint32_t player = ctx.r3.u32;
 
-    printf("[D970] player=0x%08X battlePlayer=0x%08X primed=%d insideBattle=%d cue=%s\n",
-        player, g_werehogBattlePlayer, g_werehogBattlePrimed, g_insideWerehogBattleEntry, cueName);
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
-    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogBattlePrimed)
+    printf("[D970] player=%s (0x%08X) cue=%s primed=%d persistentStarted=%d insideBattleEntry=%d\n",
+        playerLabel, player, cueName, g_werehogBattlePrimed, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
+
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
         return;
     }
@@ -324,17 +290,6 @@ PPC_FUNC(sub_82B4D970)
         __imp__sub_82B4D970(ctx, base);
         __imp__sub_82B4D970(battleCtx, base);
         g_werehogBattlePrimed = true;
-
-        if (g_werehogForceSyncPending)
-        {
-            PPCContext forcedCtx = ctx;
-            forcedCtx.r3.u32 = g_werehogNormalPlayer;
-            forcedCtx.r4.u32 = 1;
-            sub_82B4D528(forcedCtx, base);
-
-            g_werehogForceSyncPending = false;
-        }
-
     }
     else
     {
@@ -347,32 +302,14 @@ PPC_FUNC_IMPL(__imp__sub_82B465C8);
 PPC_FUNC(sub_82B465C8)
 {
     g_insideWerehogBattleEntry = true;
+
     printf("[465C8] battle entry START\n");
-
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
-    if (pGameDocument)
-    {
-        printf("[465C8] stage name at battle entry = %s\n",
-            pGameDocument->m_pMember->m_StageName.c_str());
-    }
-
-    // --- cue priming, before native battle-entry logic runs ---
-    if (!g_werehogBattlePrimed && g_werehogBattlePlayer != 0)
-    {
-        uint32_t cueAddress = GetCueGuestAddress(GetStageBattleCueName());
-
-        PPCContext battleCtx = ctx;
-        battleCtx.r3.u32 = g_werehogBattlePlayer;
-        battleCtx.r4.u32 = cueAddress;
-        __imp__sub_82B4D970(battleCtx, base);
-
-        g_werehogBattlePrimed = true;
-    }
 
     __imp__sub_82B465C8(ctx, base);
 
-    g_insideWerehogBattleEntry = false;
     printf("[465C8] battle entry END\n");
+
+    g_insideWerehogBattleEntry = false;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B45C78);
@@ -386,32 +323,6 @@ PPC_FUNC(sub_82B45C78)
     printf("D45C78 reached for Werehog soundData 0x%08X\n", soundData);
 
     __imp__sub_82B45C78(ctx, base);
-}
-
-PPC_FUNC_IMPL(__imp__sub_82B45C58);
-
-PPC_FUNC(sub_82B45C58)
-{
-    uint32_t owner = ctx.r3.u32;
-    uint32_t soundData = PPC_LOAD_U32(owner + 156);
-
-    printf("D45C58 (+168=1) owner=0x%08X soundData=0x%08X insideBattleEntry=%d\n",
-        owner, soundData, g_insideWerehogBattleEntry);
-
-    __imp__sub_82B45C58(ctx, base);
-}
-
-PPC_FUNC_IMPL(__imp__sub_82B45C68);
-
-PPC_FUNC(sub_82B45C68)
-{
-    uint32_t owner = ctx.r3.u32;
-    uint32_t soundData = PPC_LOAD_U32(owner + 156);
-
-    printf("D45C68 (+168=0) owner=0x%08X soundData=0x%08X insideBattleEntry=%d\n",
-        owner, soundData, g_insideWerehogBattleEntry);
-
-    __imp__sub_82B45C68(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
