@@ -17,6 +17,7 @@ static uint32_t g_werehogSpecialPlayer = 0;
 static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
+static bool g_werehogForceSyncPending = false;
 
 static std::string g_werehogNormalCue;
 static std::string g_werehogBattleCue;
@@ -192,6 +193,7 @@ void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
     r4.u32 = customBattleCueAddress;
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
 PPC_FUNC_IMPL(__imp__sub_82B48548);
 
@@ -219,6 +221,32 @@ PPC_FUNC(sub_82B48548)
     g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     g_werehogBattlePrimed = false;
     g_werehogPersistentBattleStarted = false;
+    g_werehogForceSyncPending = false;
+
+    // --- proactive battle-cue priming ---
+
+    // 1. Verify stage name is actually populated here before wiring in
+    //    the real call. Print it and check in-game.
+    auto pGameDocument = SWA::CGameDocument::GetInstance();
+    if (pGameDocument)
+    {
+        printf("[48548] stage name at Werehog setup = %s\n",
+            pGameDocument->m_pMember->m_StageName.c_str());
+    }
+
+    // 2. Once confirmed, arm the stage/battle cue on battlePlayer directly,
+    //    same as the D970 priming branch does — but via __imp__, not the
+    //    wrapper, since we're not reacting to a native D970 call here.
+    if (g_werehogBattlePlayer != 0)
+    {
+        uint32_t cueAddress = GetCueGuestAddress(GetStageBattleCueName());
+
+        PPCContext battleCtx = ctx;
+        battleCtx.r3.u32 = g_werehogBattlePlayer;
+        battleCtx.r4.u32 = cueAddress;
+        __imp__sub_82B4D970(battleCtx, base);
+        g_werehogBattlePrimed = true;
+    }
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D528);
@@ -241,12 +269,17 @@ PPC_FUNC(sub_82B4D528)
     }
     // NEW: catch any attempt to re-activate a battle player
     // that's already persistently running, and block it.
-    if (player == g_werehogBattlePlayer && value == 1)
+    /*if (player == g_werehogBattlePlayer && value == 1)
     {
         return; // no call to original — this activation is suppressed
+    }*/
+
+    if (player == g_werehogNormalPlayer && value == 1 && g_werehogPersistentBattleStarted)
+    {
+        return;
     }
 
-    if (player != g_werehogNormalPlayer || value != 1)
+    if (player != g_werehogNormalPlayer || value != 1 || g_werehogPersistentBattleStarted)
     {
         if (player == g_werehogSpecialPlayer)
         {
@@ -259,6 +292,7 @@ PPC_FUNC(sub_82B4D528)
             printf("D528 SPECIAL player vtable=0x%08X, vtable+4 method=0x%08X\n", vtable, method);
             printf("D528 BATTLE player vtable=0x%08X, vtable+4 method=0x%08X\n", battleVtable, battleMethod);
         }
+
         __imp__sub_82B4D528(ctx, base);
         return;
     }
@@ -306,6 +340,17 @@ PPC_FUNC(sub_82B4D970)
         __imp__sub_82B4D970(ctx, base);
         __imp__sub_82B4D970(battleCtx, base);
         g_werehogBattlePrimed = true;
+
+        if (g_werehogForceSyncPending)
+        {
+            PPCContext forcedCtx = ctx;
+            forcedCtx.r3.u32 = g_werehogNormalPlayer;
+            forcedCtx.r4.u32 = 1;
+            sub_82B4D528(forcedCtx, base);
+
+            g_werehogForceSyncPending = false;
+        }
+
     }
     else
     {
@@ -319,6 +364,11 @@ PPC_FUNC(sub_82B465C8)
 {
     g_insideWerehogBattleEntry = true;
     printf("[465C8] battle entry START\n");
+
+    /*if (!g_werehogBattlePrimed && !g_werehogPersistentBattleStarted)
+    {
+        g_werehogForceSyncPending = true;
+    }*/
 
     __imp__sub_82B465C8(ctx, base);
 
@@ -337,6 +387,32 @@ PPC_FUNC(sub_82B45C78)
     printf("D45C78 reached for Werehog soundData 0x%08X\n", soundData);
 
     __imp__sub_82B45C78(ctx, base);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B45C58);
+
+PPC_FUNC(sub_82B45C58)
+{
+    uint32_t owner = ctx.r3.u32;
+    uint32_t soundData = PPC_LOAD_U32(owner + 156);
+
+    printf("D45C58 (+168=1) owner=0x%08X soundData=0x%08X insideBattleEntry=%d\n",
+        owner, soundData, g_insideWerehogBattleEntry);
+
+    __imp__sub_82B45C58(ctx, base);
+}
+
+PPC_FUNC_IMPL(__imp__sub_82B45C68);
+
+PPC_FUNC(sub_82B45C68)
+{
+    uint32_t owner = ctx.r3.u32;
+    uint32_t soundData = PPC_LOAD_U32(owner + 156);
+
+    printf("D45C68 (+168=0) owner=0x%08X soundData=0x%08X insideBattleEntry=%d\n",
+        owner, soundData, g_insideWerehogBattleEntry);
+
+    __imp__sub_82B45C68(ctx, base);
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
