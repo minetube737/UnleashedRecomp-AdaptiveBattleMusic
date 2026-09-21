@@ -19,9 +19,6 @@ static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
 static bool g_werehogForceSyncPending = false;
 
-static std::string g_werehogNormalCue;
-static std::string g_werehogBattleCue;
-
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
     AchievementManager::Unlock(id.u32);
@@ -262,11 +259,6 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
-    if (player == g_werehogNormalPlayer && value == 1)
-    {
-        printf("[NORMAL START] cue=%s\n", g_werehogNormalCue.empty() ? "(unknown)" : g_werehogNormalCue.c_str()
-        );
-    }
     // NEW: catch any attempt to re-activate a battle player
     // that's already persistently running, and block it.
     /*if (player == g_werehogBattlePlayer && value == 1)
@@ -311,18 +303,6 @@ PPC_FUNC(sub_82B4D970)
 {
     const char* cueName = (const char*)(base + ctx.r4.u32);
     uint32_t player = ctx.r3.u32;
-    //CUE SELECTION DIAGNOSTIC
-    if (player == g_werehogNormalPlayer)
-    {
-        g_werehogNormalCue = cueName;
-        printf("[CUE SELECTED] NORMAL: %s\n", g_werehogNormalCue.c_str());
-    }
-    //CUE SELECTION DIAGNOSTIC
-    if (player == g_werehogBattlePlayer)
-    {
-        g_werehogBattleCue = cueName;
-        printf("[CUE SELECTED] BATTLE: %s\n", g_werehogBattleCue.c_str());
-    }
 
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
@@ -363,7 +343,6 @@ PPC_FUNC_IMPL(__imp__sub_82B465C8);
 PPC_FUNC(sub_82B465C8)
 {
     g_insideWerehogBattleEntry = true;
-    printf("[465C8] battle entry START\n");
 
     /*if (!g_werehogBattlePrimed && !g_werehogPersistentBattleStarted)
     {
@@ -373,7 +352,6 @@ PPC_FUNC(sub_82B465C8)
     __imp__sub_82B465C8(ctx, base);
 
     g_insideWerehogBattleEntry = false;
-    printf("[465C8] battle entry END\n");
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B45C78);
