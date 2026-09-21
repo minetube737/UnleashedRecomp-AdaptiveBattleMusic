@@ -220,6 +220,8 @@ PPC_FUNC(sub_82B48548)
     g_werehogBattleNeedsResync = false;
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B4D778);
+
 PPC_FUNC_IMPL(__imp__sub_82B4D528);
 
 PPC_FUNC(sub_82B4D528)
@@ -250,6 +252,20 @@ PPC_FUNC(sub_82B4D528)
         __imp__sub_82B4D528(ctx, base);
         return;
     }
+
+    if (g_werehogBattleNeedsResync)
+    {
+        printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
+
+        PPCContext resetCtx = ctx;
+        resetCtx.r3.u32 = g_werehogBattlePlayer;
+
+
+        __imp__sub_82B4D778(resetCtx, base);
+
+        g_werehogBattleNeedsResync = false;
+    }
+
     PPCContext battleCtx = ctx;
     battleCtx.r3.u32 = g_werehogBattlePlayer;
     battleCtx.r4.u32 = 1;
@@ -258,8 +274,6 @@ PPC_FUNC(sub_82B4D528)
 
     g_werehogPersistentBattleStarted = true;
 }
-
-PPC_FUNC_IMPL(__imp__sub_82B4D778);
 
 PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
@@ -300,7 +314,7 @@ PPC_FUNC(sub_82B4D970)
     {
         printf("[NORMAL CUE SETUP REQUEST]\n");
 
-        if (g_werehogBattleNeedsResync)
+        /*if (g_werehogBattleNeedsResync)
         {
             printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
 
@@ -311,7 +325,7 @@ PPC_FUNC(sub_82B4D970)
             __imp__sub_82B4D778(resetCtx, base);
 
             g_werehogBattleNeedsResync = false;
-        }
+        }*/
 
 
         uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
