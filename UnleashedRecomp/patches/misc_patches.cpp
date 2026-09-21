@@ -92,7 +92,7 @@ static uint32_t GetCueGuestAddress(const char* cue)
 }
 
 static std::unordered_map<std::string, std::string> g_stageBattleCues = {
-    /*{"ActN_MykonosEvil", "myk_e_btl"},
+    /*{ "ActN_MykonosEvil", "myk_e_btl" },
     { "ActN_Mission_Mykonos", "myk_e_btl" },
     { "ActN_SubMykonos_01", "myk_e_btl" },
     { "ActN_SubMykonos_02", "myk_e_btl" },
@@ -152,7 +152,6 @@ static void LoadStageBattleCues()
     printf("Loaded %zu stage battle cue entries from stage_battle_cues.json.\n", g_stageBattleCues.size());
 }
 
-
 static const char* GetStageBattleCueName()
 {
     static bool loaded = false;
@@ -180,6 +179,7 @@ void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
     static uint32_t customBattleCueAddress = 0;
     const char* customBattleCue = "test_battle";
 
+
     size_t customBattleCueSize = strlen(customBattleCue) + 1;
     static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
     
@@ -197,8 +197,6 @@ PPC_FUNC_IMPL(__imp__sub_82B48548);
 PPC_FUNC(sub_82B48548)
 {
     uint32_t owner = ctx.r3.u32;
-
-    
 
     __imp__sub_82B48548(ctx, base);
 
