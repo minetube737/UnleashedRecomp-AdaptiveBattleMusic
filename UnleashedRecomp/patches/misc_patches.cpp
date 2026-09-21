@@ -20,6 +20,7 @@ static bool g_insideWerehogBattleEntry = false;
 
 //static bool g_werehogBattleNeedsResync = false;
 static bool g_werehogEarlyPairPrepared = false;
+static bool g_werehogWaitingForNativeNormalCatchup = false;
 
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
@@ -220,6 +221,7 @@ PPC_FUNC(sub_82B48548)
     g_werehogPersistentBattleStarted = false;
     //g_werehogBattleNeedsResync = false;
     g_werehogEarlyPairPrepared = false;
+    g_werehogWaitingForNativeNormalCatchup = false;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
@@ -242,10 +244,15 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
-    if (player == g_werehogBattlePlayer &&
-        value == 1 &&
-        g_werehogEarlyPairPrepared &&
-        !g_werehogPersistentBattleStarted)
+    if (player == g_werehogNormalPlayer && value == 1 && g_werehogWaitingForNativeNormalCatchup)
+    {
+        printf("[EARLY PAIR] Ignoring late native NORMAL start\n");
+
+        g_werehogWaitingForNativeNormalCatchup = false;
+        return;
+    }
+
+    if (player == g_werehogBattlePlayer && value == 1 && g_werehogEarlyPairPrepared && !g_werehogPersistentBattleStarted)
     {
         printf("[EARLY PAIR START] Starting NORMAL + BATTLE together\n");
 
@@ -259,6 +266,7 @@ PPC_FUNC(sub_82B4D528)
         g_werehogPersistentBattleStarted = true;
         g_werehogEarlyPairPrepared = false;
 
+        g_werehogWaitingForNativeNormalCatchup = true;
         return;
     }
 
@@ -275,26 +283,17 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
-    /*if (g_werehogBattleNeedsResync)
-    {
-        printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
-
-        PPCContext resetCtx = ctx;
-        resetCtx.r3.u32 = g_werehogBattlePlayer;
-
-
-        __imp__sub_82B4D778(resetCtx, base);
-
-        g_werehogBattleNeedsResync = false;
-    }*/
-
     PPCContext battleCtx = ctx;
     battleCtx.r3.u32 = g_werehogBattlePlayer;
     battleCtx.r4.u32 = 1;
-    __imp__sub_82B4D528(ctx, base);
-    __imp__sub_82B4D528(battleCtx, base);
 
-    g_werehogPersistentBattleStarted = true;
+    __imp__sub_82B4D528(ctx, base);
+
+    if (!g_werehogPersistentBattleStarted)
+    {
+        __imp__sub_82B4D528(battleCtx, base);
+        g_werehogPersistentBattleStarted = true;
+    }
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D970);
@@ -309,6 +308,14 @@ PPC_FUNC(sub_82B4D970)
 
     const char* cueName = (const char*)(base + ctx.r4.u32);
     uint32_t player = ctx.r3.u32;
+
+    if (player == g_werehogNormalPlayer &&
+        strcmp(cueName, "evil_normal") == 0 &&
+        g_werehogWaitingForNativeNormalCatchup)
+    {
+        printf("[EARLY PAIR] Ignoring late native NORMAL cue setup\n");
+        return;
+    }
 
     const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
@@ -345,20 +352,6 @@ PPC_FUNC(sub_82B4D970)
     if(strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
     {
         printf("[NORMAL CUE SETUP REQUEST]\n");
-
-        /*if (g_werehogBattleNeedsResync)
-        {
-            printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
-
-            PPCContext resetCtx = ctx;
-            resetCtx.r3.u32 = g_werehogBattlePlayer;
-
-
-            __imp__sub_82B4D778(resetCtx, base);
-
-            g_werehogBattleNeedsResync = false;
-        }*/
-
 
         uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
 
@@ -408,11 +401,25 @@ PPC_FUNC(sub_82B45C78)
 PPC_FUNC(sub_82B4D778)
 {
     uint32_t player = ctx.r3.u32;
-    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
-    printf("[D778] player=%s (0x%08X) persistentStarted=%d insideBattleEntry=%d\n", playerLabel, player, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
+    const char* playerLabel =
+        (player == g_werehogNormalPlayer) ? "NORMAL" :
+        (player == g_werehogBattlePlayer) ? "BATTLE" :
+        "OTHER";
 
-    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
+    printf(
+        "[D778] player=%s (0x%08X) persistentStarted=%d insideBattleEntry=%d\n",
+        playerLabel,
+        player,
+        g_werehogPersistentBattleStarted,
+        g_insideWerehogBattleEntry
+    );
+
+    // Normal battle entry while our persistent battlePlayer is alive:
+    // DON'T let the game reset it.
+    if (player == g_werehogBattlePlayer &&
+        g_insideWerehogBattleEntry &&
+        g_werehogPersistentBattleStarted)
     {
         printf(
             "Skipping battlePlayer D778 during battle entry: "
@@ -421,9 +428,26 @@ PPC_FUNC(sub_82B4D778)
 
         return;
     }
-    
+
+    // Let the game's D778 happen normally.
     __imp__sub_82B4D778(ctx, base);
 
+    // If battlePlayer gets reset OUTSIDE battle entry while our
+    // persistent system thinks it's alive, its playback state is
+    // no longer trustworthy.
+    //
+    // This is what appears to happen during Stage Restart.
+    if (player == g_werehogBattlePlayer &&
+        !g_insideWerehogBattleEntry &&
+        g_werehogPersistentBattleStarted)
+    {
+        printf("[PERSISTENT RESET] battlePlayer reset outside battle entry\n");
+
+        g_werehogBattlePrimed = false;
+        g_werehogPersistentBattleStarted = false;
+        g_werehogEarlyPairPrepared = false;
+        g_werehogWaitingForNativeNormalCatchup = false;
+    }
 }
 
 
