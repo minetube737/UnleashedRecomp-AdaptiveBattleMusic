@@ -408,3 +408,5 @@ FodyWeavers.xsd
 **/cmake-build-debug
 **/CMakeCache.txt
 /UnleashedRecompLib/ppc/ppc.rar
+UnleashedRecompLib/ppc/ppc.zip
+UnleashedRecompLib/ppc.rar
