@@ -18,7 +18,8 @@ static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
 
-static bool g_werehogBattleNeedsResync = false;
+//static bool g_werehogBattleNeedsResync = false;
+static bool g_werehogEarlyPairPrepared = false;
 
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
@@ -217,7 +218,8 @@ PPC_FUNC(sub_82B48548)
     g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     g_werehogBattlePrimed = false;
     g_werehogPersistentBattleStarted = false;
-    g_werehogBattleNeedsResync = false;
+    //g_werehogBattleNeedsResync = false;
+    g_werehogEarlyPairPrepared = false;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
@@ -240,6 +242,26 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
+    if (player == g_werehogBattlePlayer &&
+        value == 1 &&
+        g_werehogEarlyPairPrepared &&
+        !g_werehogPersistentBattleStarted)
+    {
+        printf("[EARLY PAIR START] Starting NORMAL + BATTLE together\n");
+
+        PPCContext normalCtx = ctx;
+        normalCtx.r3.u32 = g_werehogNormalPlayer;
+        normalCtx.r4.u32 = 1;
+
+        __imp__sub_82B4D528(normalCtx, base);
+        __imp__sub_82B4D528(ctx, base);
+
+        g_werehogPersistentBattleStarted = true;
+        g_werehogEarlyPairPrepared = false;
+
+        return;
+    }
+
     // NEW: catch any attempt to re-activate a battle player
     // that's already persistently running, and block it.
     if (player == g_werehogBattlePlayer && value == 1 && g_werehogPersistentBattleStarted)
@@ -253,7 +275,7 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
-    if (g_werehogBattleNeedsResync)
+    /*if (g_werehogBattleNeedsResync)
     {
         printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
 
@@ -264,7 +286,7 @@ PPC_FUNC(sub_82B4D528)
         __imp__sub_82B4D778(resetCtx, base);
 
         g_werehogBattleNeedsResync = false;
-    }
+    }*/
 
     PPCContext battleCtx = ctx;
     battleCtx.r3.u32 = g_werehogBattlePlayer;
@@ -294,13 +316,23 @@ PPC_FUNC(sub_82B4D970)
     
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && !g_werehogBattlePrimed)
     {
-        printf("[EARLY BATTLE] Using custom battle cue\n");
+        printf("[EARLY BATTLE] Preparing synchronized NORMAL + BATTLE pair\n");
 
-        ctx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
+        // Prepare evil_normal on normalPlayer.
+        PPCContext normalCtx = ctx;
+        normalCtx.r3.u32 = g_werehogNormalPlayer;
+        normalCtx.r4.u32 = GetCueGuestAddress("evil_normal");
 
-        __imp__sub_82B4D970(ctx, base);
+        // Prepare custom battle cue on battlePlayer.
+        PPCContext battleCtx = ctx;
+        battleCtx.r3.u32 = g_werehogBattlePlayer;
+        battleCtx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
 
-        g_werehogBattleNeedsResync = true;
+        __imp__sub_82B4D970(normalCtx, base);
+        __imp__sub_82B4D970(battleCtx, base);
+
+        g_werehogBattlePrimed = true;
+        g_werehogEarlyPairPrepared = true;
 
         return;
     }
