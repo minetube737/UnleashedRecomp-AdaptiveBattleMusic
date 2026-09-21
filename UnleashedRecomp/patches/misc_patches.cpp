@@ -18,7 +18,6 @@ static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
 
-//static bool g_werehogBattleNeedsResync = false;
 static bool g_werehogEarlyPairPrepared = false;
 static bool g_werehogWaitingForNativeNormalCatchup = false;
 
@@ -235,9 +234,6 @@ PPC_FUNC(sub_82B4D528)
 
     const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
-    printf("[D528] player=%s (0x%08X) value=%u persistentStarted=%d insideBattleEntry=%d\n",
-        playerLabel, player, value, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
-
     if (player == 0)
     {
         __imp__sub_82B4D528(ctx, base);
@@ -270,8 +266,9 @@ PPC_FUNC(sub_82B4D528)
         return;
     }
 
-    // NEW: catch any attempt to re-activate a battle player
-    // that's already persistently running, and block it.
+    // battlePlayer is already persistently running (past the first
+    // encounter). Suppress native's re-activation so it doesn't restart
+    // from 0:00 on every subsequent battle.
     if (player == g_werehogBattlePlayer && value == 1 && g_werehogPersistentBattleStarted)
     {
         return; // no call to original — this activation is suppressed
@@ -318,8 +315,6 @@ PPC_FUNC(sub_82B4D970)
     }
 
     const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
-
-    printf("[D970] player=%s (0x%08X) cue=%s primed=%d persistentStarted=%d insideBattleEntry=%d\n", playerLabel, player, cueName, g_werehogBattlePrimed, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
     
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && !g_werehogBattlePrimed)
     {
@@ -396,24 +391,11 @@ PPC_FUNC(sub_82B45C78)
     __imp__sub_82B45C78(ctx, base);
 }
 
-//PPC_FUNC_IMPL(__imp__sub_82B4D778);
-
 PPC_FUNC(sub_82B4D778)
 {
     uint32_t player = ctx.r3.u32;
 
-    const char* playerLabel =
-        (player == g_werehogNormalPlayer) ? "NORMAL" :
-        (player == g_werehogBattlePlayer) ? "BATTLE" :
-        "OTHER";
-
-    printf(
-        "[D778] player=%s (0x%08X) persistentStarted=%d insideBattleEntry=%d\n",
-        playerLabel,
-        player,
-        g_werehogPersistentBattleStarted,
-        g_insideWerehogBattleEntry
-    );
+    const char* playerLabel =  (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
     // Normal battle entry while our persistent battlePlayer is alive:
     // DON'T let the game reset it.
