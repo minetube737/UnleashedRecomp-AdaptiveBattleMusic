@@ -18,6 +18,8 @@ static bool g_werehogBattlePrimed = false;
 static bool g_werehogPersistentBattleStarted = false;
 static bool g_insideWerehogBattleEntry = false;
 
+static bool g_werehogBattleNeedsResync = false;
+
 void AchievementManagerUnlockMidAsmHook(PPCRegister& id)
 {
     AchievementManager::Unlock(id.u32);
@@ -215,6 +217,7 @@ PPC_FUNC(sub_82B48548)
     g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     g_werehogBattlePrimed = false;
     g_werehogPersistentBattleStarted = false;
+    g_werehogBattleNeedsResync = false;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D528);
@@ -256,6 +259,8 @@ PPC_FUNC(sub_82B4D528)
     g_werehogPersistentBattleStarted = true;
 }
 
+PPC_FUNC_IMPL(__imp__sub_82B4D778);
+
 PPC_FUNC_IMPL(__imp__sub_82B4D970);
 
 PPC_FUNC(sub_82B4D970)
@@ -271,8 +276,20 @@ PPC_FUNC(sub_82B4D970)
 
     const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
-    printf("[D970] player=%s (0x%08X) cue=%s primed=%d persistentStarted=%d insideBattleEntry=%d\n",
-        playerLabel, player, cueName, g_werehogBattlePrimed, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
+    printf("[D970] player=%s (0x%08X) cue=%s primed=%d persistentStarted=%d insideBattleEntry=%d\n", playerLabel, player, cueName, g_werehogBattlePrimed, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
+    
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && !g_werehogBattlePrimed)
+    {
+        printf("[EARLY BATTLE] Using custom battle cue\n");
+
+        ctx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
+
+        __imp__sub_82B4D970(ctx, base);
+
+        g_werehogBattleNeedsResync = true;
+
+        return;
+    }
 
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
@@ -281,6 +298,21 @@ PPC_FUNC(sub_82B4D970)
 
     if(strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
     {
+        printf("[NORMAL CUE SETUP REQUEST]\n");
+
+        if (g_werehogBattleNeedsResync)
+        {
+            printf("[RESYNC] Resetting early battlePlayer before persistent setup\n");
+
+            PPCContext resetCtx = ctx;
+            resetCtx.r3.u32 = g_werehogBattlePlayer;
+
+
+            __imp__sub_82B4D778(resetCtx, base);
+
+            g_werehogBattleNeedsResync = false;
+        }
+
 
         uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
 
@@ -325,11 +357,14 @@ PPC_FUNC(sub_82B45C78)
     __imp__sub_82B45C78(ctx, base);
 }
 
-PPC_FUNC_IMPL(__imp__sub_82B4D778);
+//PPC_FUNC_IMPL(__imp__sub_82B4D778);
 
 PPC_FUNC(sub_82B4D778)
 {
     uint32_t player = ctx.r3.u32;
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
+
+    printf("[D778] player=%s (0x%08X) persistentStarted=%d insideBattleEntry=%d\n", playerLabel, player, g_werehogPersistentBattleStarted, g_insideWerehogBattleEntry);
 
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
