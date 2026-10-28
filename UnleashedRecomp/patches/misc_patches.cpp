@@ -180,9 +180,15 @@ static const char* GetStageBattleCueName()
     const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
     printf("[STAGE NAME] %s\n", stageName);
 
-    auto it = g_stageBattleCues.find(stageName);
-    if (it != g_stageBattleCues.end())
-        return it->second.c_str();
+    //auto it = g_stageBattleCues.find(stageName);
+    //if (it != g_stageBattleCues.end())
+    //    return it->second.c_str();
+
+    for (const auto& [location, cue] : g_stageBattleCues)
+    {
+        if (std::string(stageName).find(location) != std::string::npos)
+            return cue.c_str();
+    }
 
     return "evil_battle1";
 }
