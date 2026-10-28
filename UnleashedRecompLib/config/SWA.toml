@@ -436,11 +436,6 @@ address = 0x82B47C58
 registers = ["r11"]
 
 [[midasm_hook]]
-name = "SkipAdaptiveBattleResetMidAsmHook"
-address = 0x82B465EC
-jump_address_on_true = 0x82B465F0
-
-[[midasm_hook]]
 name = "MotionBlurMidAsmHook"
 address = 0x82BA99D0
 jump_address_on_false = 0x82BAA544

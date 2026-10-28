@@ -164,33 +164,6 @@ static void LoadStageBattleCues()
     printf("Loaded %zu stage battle cue entries from stage_battle_cues.json.\n", g_stageBattleCues.size());
 }
 
-static bool IsAdaptiveBattleStage()
-{
-    static bool loaded = false;
-    if (!loaded)
-    {
-        LoadStageBattleCues();
-        loaded = true;
-    }
-
-    auto pGameDocument = SWA::CGameDocument::GetInstance();
-    if (!pGameDocument)
-        return false;
-
-    const std::string stageName = pGameDocument->m_pMember->m_StageName.c_str();
-
-    if (stageName.find("Town_") != std::string::npos)
-        return false;
-
-    for (const auto& [location, cue] : g_stageBattleCues)
-    {
-        if (std::string(stageName).find(location) != std::string::npos)
-            return true;
-    }
-
-    return false;
-}
-
 static const char* GetStageBattleCueName()
 {
     static bool loaded = false;
@@ -201,35 +174,36 @@ static const char* GetStageBattleCueName()
     }
 
     auto pGameDocument = SWA::CGameDocument::GetInstance();
-
     if (!pGameDocument)
-        return nullptr;
+        return "evil_battle1";
 
-    const std::string stageName = pGameDocument->m_pMember->m_StageName.c_str();
+    const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
+    printf("[STAGE NAME] %s\n", stageName);
 
-    printf("[STAGE NAME] %s\n", stageName.c_str());
+    //auto it = g_stageBattleCues.find(stageName);
+    //if (it != g_stageBattleCues.end())
+    //    return it->second.c_str();
 
-    if (stageName.find("Town_") != std::string::npos)
-        return nullptr;
+    for (const auto& [location, cue] : g_stageBattleCues)
+    {
+        if (std::string(stageName).find(location) != std::string::npos)
+            return cue.c_str();
+    }
 
-    auto it = g_stageBattleCues.find(stageName);
-    if (it != g_stageBattleCues.end())
-        return it->second.c_str();
-
-    return nullptr;
+    return "evil_battle1";
 }
 
 
 
 void WerehogBattleCueTestMidAsmHook(PPCRegister& r4)
-{   
+{
     static uint32_t customBattleCueAddress = 0;
     const char* customBattleCue = "test_battle";
 
 
     size_t customBattleCueSize = strlen(customBattleCue) + 1;
     static void* customBattleCueMemory = g_userHeap.Alloc(customBattleCueSize);
-    
+
     if (customBattleCueAddress == 0)
     {
         memcpy(customBattleCueMemory, customBattleCue, customBattleCueSize);
@@ -353,22 +327,16 @@ PPC_FUNC(sub_82B4D970)
 
     printf("[CUE] %s\n", cueName);
 
-    const char* adaptiveCue = GetStageBattleCueName();
-
-    if (adaptiveCue == nullptr)
-    {
-        __imp__sub_82B4D970(ctx, base);
-        return;
-    }
-
-    if (player == g_werehogNormalPlayer && strcmp(cueName, "evil_normal") == 0 && g_werehogWaitingForNativeNormalCatchup)
+    if (player == g_werehogNormalPlayer &&
+        strcmp(cueName, "evil_normal") == 0 &&
+        g_werehogWaitingForNativeNormalCatchup)
     {
         printf("[EARLY PAIR] Ignoring late native NORMAL cue setup\n");
         return;
     }
 
     const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
-    
+
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && !g_werehogBattlePrimed)
     {
         printf("[EARLY BATTLE] Preparing synchronized NORMAL + BATTLE pair\n");
@@ -381,7 +349,7 @@ PPC_FUNC(sub_82B4D970)
         // Prepare custom battle cue on battlePlayer.
         PPCContext battleCtx = ctx;
         battleCtx.r3.u32 = g_werehogBattlePlayer;
-        battleCtx.r4.u32 = GetCueGuestAddress(adaptiveCue);
+        battleCtx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
 
         __imp__sub_82B4D970(normalCtx, base);
         __imp__sub_82B4D970(battleCtx, base);
@@ -392,22 +360,17 @@ PPC_FUNC(sub_82B4D970)
         return;
     }
 
-    /*if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
-    {
-        return;
-    }*/
-
-    if (player == g_werehogBattlePlayer && g_werehogPersistentBattleStarted)
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
     {
         return;
     }
 
-    if(strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
+    if (strcmp(cueName, "evil_normal") == 0 && g_werehogBattlePlayer != 0 && !g_werehogBattlePrimed)
     {
         printf("[NORMAL CUE SETUP REQUEST]\n");
 
-        uint32_t testBattleCueAddress = GetCueGuestAddress(adaptiveCue);
-        printf("[ADAPTIVE CUE] %s\n", adaptiveCue);
+        uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
+        printf("[ADAPTIVE CUE] %s\n", GetStageBattleCueName());
 
         PPCContext battleCtx = ctx;
         battleCtx.r3.u64 = g_werehogBattlePlayer;
@@ -422,7 +385,7 @@ PPC_FUNC(sub_82B4D970)
     }
 }
 
-/*PPC_FUNC_IMPL(__imp__sub_82B465C8);
+PPC_FUNC_IMPL(__imp__sub_82B465C8);
 
 PPC_FUNC(sub_82B465C8)
 {
@@ -435,11 +398,6 @@ PPC_FUNC(sub_82B465C8)
     printf("[465C8] battle entry END\n");
 
     g_insideWerehogBattleEntry = false;
-}*/
-
-bool SkipAdaptiveBattleResetMidAsmHook()
-{
-    return g_werehogPersistentBattleStarted;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B45C78);
@@ -459,7 +417,7 @@ PPC_FUNC(sub_82B4D778)
 {
     uint32_t player = ctx.r3.u32;
 
-    const char* playerLabel =  (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
+    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
     // Normal battle entry while our persistent battlePlayer is alive:
     // DON'T let the game reset it.
@@ -572,7 +530,7 @@ PPC_FUNC(sub_82736E80)
 {
     // GroupID parameter text
     auto* groupId = (const char*)(base + PPC_LOAD_U32(ctx.r3.u32 + 0x100));
-    
+
     if (!Config::Hints)
     {
         // WhiteIsland_ACT1_001: "Your friend went off that way, Sonic. Quick, let's go after him!"
