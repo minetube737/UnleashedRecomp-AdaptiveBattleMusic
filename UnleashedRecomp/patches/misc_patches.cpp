@@ -164,7 +164,7 @@ static void LoadStageBattleCues()
     printf("Loaded %zu stage battle cue entries from stage_battle_cues.json.\n", g_stageBattleCues.size());
 }
 
-static const char* GetStageBattleCueName()
+static bool IsAdaptiveBattleStage()
 {
     static bool loaded = false;
     if (!loaded)
@@ -175,10 +175,42 @@ static const char* GetStageBattleCueName()
 
     auto pGameDocument = SWA::CGameDocument::GetInstance();
     if (!pGameDocument)
-        return "evil_battle1";
+        return false;
 
-    const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
-    printf("[STAGE NAME] %s\n", stageName);
+    const std::string stageName = pGameDocument->m_pMember->m_StageName.c_str();
+
+    if (stageName.find("Town_") != std::string::npos)
+        return false;
+
+    for (const auto& [location, cue] : g_stageBattleCues)
+    {
+        if (std::string(stageName).find(location) != std::string::npos)
+            return true;
+    }
+
+    return false;
+}
+
+static const char* GetStageBattleCueName()
+{
+    static bool loaded = false;
+    if (!loaded)
+    {
+        LoadStageBattleCues();
+        loaded = true;
+    }
+
+    auto pGameDocument = SWA::CGameDocument::GetInstance();
+
+    if (!pGameDocument)
+        return nullptr;
+
+    const std::string stageName = pGameDocument->m_pMember->m_StageName.c_str();
+
+    printf("[STAGE NAME] %s\n", stageName.c_str());
+
+    if (stageName.find("Town_") != std::string::npos)
+        return nullptr;
 
     //auto it = g_stageBattleCues.find(stageName);
     //if (it != g_stageBattleCues.end())
@@ -190,7 +222,7 @@ static const char* GetStageBattleCueName()
             return cue.c_str();
     }
 
-    return "evil_battle1";
+    return nullptr;
 }
 
 
@@ -327,9 +359,15 @@ PPC_FUNC(sub_82B4D970)
 
     printf("[CUE] %s\n", cueName);
 
-    if (player == g_werehogNormalPlayer &&
-        strcmp(cueName, "evil_normal") == 0 &&
-        g_werehogWaitingForNativeNormalCatchup)
+    const char* adaptiveCue = GetStageBattleCueName();
+
+    if (adaptiveCue == nullptr)
+    {
+        __imp__sub_82B4D970(ctx, base);
+        return;
+    }
+
+    if (player == g_werehogNormalPlayer && strcmp(cueName, "evil_normal") == 0 && g_werehogWaitingForNativeNormalCatchup)
     {
         printf("[EARLY PAIR] Ignoring late native NORMAL cue setup\n");
         return;
@@ -349,7 +387,7 @@ PPC_FUNC(sub_82B4D970)
         // Prepare custom battle cue on battlePlayer.
         PPCContext battleCtx = ctx;
         battleCtx.r3.u32 = g_werehogBattlePlayer;
-        battleCtx.r4.u32 = GetCueGuestAddress(GetStageBattleCueName());
+        battleCtx.r4.u32 = GetCueGuestAddress(adaptiveCue);
 
         __imp__sub_82B4D970(normalCtx, base);
         __imp__sub_82B4D970(battleCtx, base);
@@ -360,7 +398,12 @@ PPC_FUNC(sub_82B4D970)
         return;
     }
 
-    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
+    /*if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogPersistentBattleStarted)
+    {
+        return;
+    }*/
+
+    if (player == g_werehogBattlePlayer && g_werehogPersistentBattleStarted)
     {
         return;
     }
@@ -369,8 +412,8 @@ PPC_FUNC(sub_82B4D970)
     {
         printf("[NORMAL CUE SETUP REQUEST]\n");
 
-        uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
-        printf("[ADAPTIVE CUE] %s\n", GetStageBattleCueName());
+        uint32_t testBattleCueAddress = GetCueGuestAddress(adaptiveCue);
+        printf("[ADAPTIVE CUE] %s\n", adaptiveCue);
 
         PPCContext battleCtx = ctx;
         battleCtx.r3.u64 = g_werehogBattlePlayer;
@@ -385,7 +428,7 @@ PPC_FUNC(sub_82B4D970)
     }
 }
 
-PPC_FUNC_IMPL(__imp__sub_82B465C8);
+/*PPC_FUNC_IMPL(__imp__sub_82B465C8);
 
 PPC_FUNC(sub_82B465C8)
 {
@@ -398,6 +441,11 @@ PPC_FUNC(sub_82B465C8)
     printf("[465C8] battle entry END\n");
 
     g_insideWerehogBattleEntry = false;
+}*/
+
+bool SkipAdaptiveBattleResetMidAsmHook()
+{
+    return g_werehogPersistentBattleStarted;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B45C78);
