@@ -9,6 +9,7 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <user/paths.h>
+#include <mod/mod_loader.h>
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
@@ -112,7 +113,18 @@ static std::unordered_map<std::string, std::string> g_stageBattleCues = {
 
 static void LoadStageBattleCues()
 {
-    auto path = GetGamePath() / "stage_battle_cues.json";
+    // First look through enabled mods using Unleashed Recompiled's
+    // existing mod loader.
+    auto path = ModLoader::ResolvePath("stage_battle_cues.json");
+
+    if (path.empty())
+    {
+        // Optional standalone fallback.
+        // Re-enable if stage_battle_cues.json is ever shipped alongside the build
+        //path = GetGamePath() / "stage_battle_cues.json";
+        printf("stage_battle_cues.json was not found in any enabled mod.\n");
+        return;
+    }
 
     printf("Looking for stage cue file at: %s\n", path.string().c_str());
 
@@ -166,6 +178,7 @@ static const char* GetStageBattleCueName()
         return "evil_battle1";
 
     const char* stageName = pGameDocument->m_pMember->m_StageName.c_str();
+    printf("[STAGE NAME] %s\n", stageName);
 
     auto it = g_stageBattleCues.find(stageName);
     if (it != g_stageBattleCues.end())
@@ -306,6 +319,8 @@ PPC_FUNC(sub_82B4D970)
     const char* cueName = (const char*)(base + ctx.r4.u32);
     uint32_t player = ctx.r3.u32;
 
+    printf("[CUE] %s\n", cueName);
+
     if (player == g_werehogNormalPlayer &&
         strcmp(cueName, "evil_normal") == 0 &&
         g_werehogWaitingForNativeNormalCatchup)
@@ -349,6 +364,7 @@ PPC_FUNC(sub_82B4D970)
         printf("[NORMAL CUE SETUP REQUEST]\n");
 
         uint32_t testBattleCueAddress = GetCueGuestAddress(GetStageBattleCueName());
+        printf("[ADAPTIVE CUE] %s\n", GetStageBattleCueName());
 
         PPCContext battleCtx = ctx;
         battleCtx.r3.u64 = g_werehogBattlePlayer;
