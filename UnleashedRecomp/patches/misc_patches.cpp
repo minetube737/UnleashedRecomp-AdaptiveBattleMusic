@@ -13,7 +13,6 @@
 
 static uint32_t g_werehogNormalPlayer = 0;
 static uint32_t g_werehogBattlePlayer = 0;
-static uint32_t g_werehogSpecialPlayer = 0;
 
 static bool g_insideWerehogBattleEntry = false;
 
@@ -240,9 +239,13 @@ PPC_FUNC(sub_82B48548)
 
     g_werehogNormalPlayer = PPC_LOAD_U32(soundData + 8);
     g_werehogBattlePlayer = PPC_LOAD_U32(soundData + 16);
-    g_werehogSpecialPlayer = PPC_LOAD_U32(soundData + 24);
     
     g_werehogMusicState = WerehogMusicState::Idle;
+}
+
+static bool IsWerehogMusicPersistent()
+{
+    return g_werehogMusicState == WerehogMusicState::Running || g_werehogMusicState == WerehogMusicState::WaitingForNativeNormal;
 }
 
 PPC_FUNC_IMPL(__imp__sub_82B4D778);
@@ -253,8 +256,6 @@ PPC_FUNC(sub_82B4D528)
 {
     uint32_t player = ctx.r3.u32;
     uint32_t value = ctx.r4.u32;
-
-    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
 
     if (player == 0)
     {
@@ -288,7 +289,7 @@ PPC_FUNC(sub_82B4D528)
     // battlePlayer is already persistently running (past the first
     // encounter). Suppress native's re-activation so it doesn't restart
     // from 0:00 on every subsequent battle.
-    if (player == g_werehogBattlePlayer && value == 1 && (g_werehogMusicState == WerehogMusicState::Running || g_werehogMusicState == WerehogMusicState::WaitingForNativeNormal))
+    if (player == g_werehogBattlePlayer && value == 1 && IsWerehogMusicPersistent())
     {
         return;
     }
@@ -333,8 +334,6 @@ PPC_FUNC(sub_82B4D970)
         return;
     }
 
-    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
-
     if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && g_werehogMusicState == WerehogMusicState::Idle)
     {
         printf("[EARLY BATTLE] Preparing synchronized NORMAL + BATTLE pair\n");
@@ -357,7 +356,7 @@ PPC_FUNC(sub_82B4D970)
         return;
     }
 
-    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && (g_werehogMusicState == WerehogMusicState::Running || g_werehogMusicState == WerehogMusicState::WaitingForNativeNormal))
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && IsWerehogMusicPersistent())
     {
         return;
     }
@@ -414,11 +413,9 @@ PPC_FUNC(sub_82B4D778)
 {
     uint32_t player = ctx.r3.u32;
 
-    const char* playerLabel = (player == g_werehogNormalPlayer) ? "NORMAL" : (player == g_werehogBattlePlayer) ? "BATTLE" : "OTHER";
-
     // Normal battle entry while our persistent battlePlayer is alive:
     // DON'T let the game reset it.
-    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && (g_werehogMusicState == WerehogMusicState::Running || g_werehogMusicState == WerehogMusicState::WaitingForNativeNormal))
+    if (player == g_werehogBattlePlayer && g_insideWerehogBattleEntry && IsWerehogMusicPersistent())
     {
         printf(
             "Skipping battlePlayer D778 during battle entry: "
@@ -436,7 +433,7 @@ PPC_FUNC(sub_82B4D778)
     // no longer trustworthy.
     //
     // This is what appears to happen during Stage Restart.
-    if (player == g_werehogBattlePlayer && !g_insideWerehogBattleEntry && (g_werehogMusicState == WerehogMusicState::Running || g_werehogMusicState == WerehogMusicState::WaitingForNativeNormal))
+    if (player == g_werehogBattlePlayer && !g_insideWerehogBattleEntry && IsWerehogMusicPersistent())
     {
         printf("[PERSISTENT RESET] battlePlayer reset outside battle entry\n");
 
